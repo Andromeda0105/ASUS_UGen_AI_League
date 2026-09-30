@@ -1,0 +1,14 @@
+Sep 30 19:20:03 demo-server sshd[8101]: Failed password for invalid user admin from 203.0.113.42 port 50101 ssh2
+Sep 30 19:20:10 demo-server sshd[8102]: Failed password for root from 203.0.113.42 port 50102 ssh2
+Sep 30 19:20:17 demo-server sshd[8103]: Failed password for root from 203.0.113.42 port 50103 ssh2
+Sep 30 19:20:24 demo-server sshd[8104]: Failed password for ubuntu from 203.0.113.42 port 50104 ssh2
+Sep 30 19:20:31 demo-server sshd[8105]: Failed password for root from 203.0.113.42 port 50105 ssh2
+Sep 30 19:20:38 demo-server sshd[8106]: Failed password for deploy from 203.0.113.42 port 50106 ssh2
+Sep 30 19:20:45 demo-server sshd[8107]: Failed password for root from 203.0.113.42 port 50107 ssh2
+Sep 30 19:20:51 demo-server sshd[8108]: Accepted publickey for deploy from 203.0.113.42 port 50108 ssh2
+Sep 30 19:21:02 demo-server sshd[8109]: Failed password for root from 198.51.100.27 port 50801 ssh2
+Sep 30 19:21:08 demo-server sshd[8110]: Failed password for root from 198.51.100.27 port 50802 ssh2
+Sep 30 19:21:14 demo-server sshd[8111]: Failed password for root from 198.51.100.27 port 50803 ssh2
+Sep 30 19:21:20 demo-server sshd[8112]: Failed password for root from 198.51.100.27 port 50804 ssh2
+Sep 30 19:21:26 demo-server sshd[8113]: Failed password for root from 198.51.100.27 port 50805 ssh2
+Sep 30 19:21:32 demo-server sshd[8114]: Failed password for root from 198.51.100.27 port 50806 ssh2

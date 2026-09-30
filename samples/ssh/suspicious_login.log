@@ -1,0 +1,8 @@
+Sep 30 13:00:01 server sshd[3001]: Failed password for admin from 10.0.0.8 port 41001 ssh2
+Sep 30 13:00:04 server sshd[3002]: Failed password for admin from 10.0.0.8 port 41002 ssh2
+Sep 30 13:00:07 server sshd[3003]: Failed password for admin from 10.0.0.8 port 41003 ssh2
+Sep 30 13:00:10 server sshd[3004]: Failed password for admin from 10.0.0.8 port 41004 ssh2
+Sep 30 13:00:13 server sshd[3005]: Failed password for admin from 10.0.0.8 port 41005 ssh2
+Sep 30 13:00:16 server sshd[3006]: Failed password for admin from 10.0.0.8 port 41006 ssh2
+Sep 30 13:00:21 server sshd[3010]: Accepted password for admin from 10.0.0.8 port 41007 ssh2
+Sep 30 13:00:21 server sshd[3010]: pam_unix(sshd:session): session opened for user admin(uid=1001) by (uid=0)

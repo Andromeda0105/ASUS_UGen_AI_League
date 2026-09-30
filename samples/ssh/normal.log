@@ -1,0 +1,6 @@
+Sep 30 10:00:01 server sshd[1001]: Accepted publickey for alice from 192.168.1.10 port 50123 ssh2
+Sep 30 10:00:01 server sshd[1001]: pam_unix(sshd:session): session opened for user alice(uid=1000) by (uid=0)
+Sep 30 10:05:23 server sshd[1023]: Failed password for bob from 192.168.1.20 port 51234 ssh2
+Sep 30 10:05:31 server sshd[1024]: Accepted password for bob from 192.168.1.20 port 51235 ssh2
+Sep 30 10:30:42 server sshd[1001]: pam_unix(sshd:session): session closed for user alice
+Sep 30 11:02:12 server sshd[1201]: Accepted publickey for alice from 192.168.1.10 port 52001 ssh2
