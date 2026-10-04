@@ -1,13 +1,18 @@
 from pathlib import Path
 import json
 import os
+from collections import OrderedDict
+from threading import Lock
+from uuid import uuid4
+from hashlib import sha256
 from urllib.error import URLError
 from urllib.request import urlopen
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 
+from app.incidents import correlate_incidents
+from app.evidence import EvidenceStore
 from app.detectors.nginx import detect_nginx_alerts
 from app.detectors.ssh import detect_ssh_alerts
 from app.copilot import OllamaError, analyze_security_scan
@@ -20,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT
 SAMPLE_YEAR = 2026
 SAMPLES = {
+    "scenario": {"multi_stage": "跨來源 · Web 探測 → SSH 可疑登入"},
     "ssh": {
         "compromised_login.log": "SSH · 暴力破解與可疑登入",
         "normal.log": "SSH · 一般登入",
@@ -35,9 +41,12 @@ SAMPLES = {
     },
 }
 
+SCANS: OrderedDict[str, EvidenceStore] = OrderedDict()
+SCAN_LOCK = Lock()
+
 app = FastAPI(
     title="AI Security Log Copilot API",
-    description="Deterministic SSH log parsing and alert detection prototype.",
+    description="Local SSH/Nginx detection, incident correlation and read-only investigation.",
     version="0.1.0",
 )
 
@@ -49,6 +58,11 @@ def load_sample_events(sample: str = "ssh:compromised_login.log") -> list[LogEve
         raise HTTPException(status_code=404, detail="樣本名稱格式應為 source:filename") from error
     if source not in SAMPLES or filename not in SAMPLES[source]:
         raise HTTPException(status_code=404, detail="找不到指定的樣本")
+    if source == "scenario":
+        directory = ROOT / "samples" / "scenarios"
+        return sorted(parse_nginx_logs((directory / "multi_stage_access.log").read_text())
+                      + parse_ssh_logs((directory / "multi_stage_auth.log").read_text(), year=SAMPLE_YEAR),
+                      key=lambda event: event.timestamp)
     sample_dir = ROOT / "samples" / "ssh" if source == "ssh" else ROOT / "samples"
     sample_path = sample_dir / filename
     text = sample_path.read_text(encoding="utf-8")
@@ -83,24 +97,72 @@ def get_samples() -> list[dict[str, str]]:
 
 @app.post("/api/scan", response_model=ScanResult)
 def scan_sample(request: ScanRequest) -> ScanResult:
-    events = load_sample_events(request.sample)
-    source = request.sample.split(":", maxsplit=1)[0]
-    alerts = detect_ssh_alerts(events) if source == "ssh" else detect_nginx_alerts(events)
+    sample_names = request.samples if request.samples is not None else [request.sample]
+    # Dedupe overlapping files so replaying the same evidence cannot inflate thresholds.
+    event_index = {event.id: event for name in sample_names for event in load_sample_events(name)}
+    events = sorted(event_index.values(), key=lambda event: event.timestamp)
+    sample_name = ", ".join(sample_names)
+    alerts = detect_ssh_alerts([e for e in events if e.source == "auth.log"])
+    alerts += detect_nginx_alerts([e for e in events if e.source == "nginx.access.log"])
+    for alert in alerts:
+        key = alert.alert_type + "|" + "|".join(sorted(e.id for e in alert.related_events))
+        alert.id = alert.id.rsplit("-", 1)[0] + "-" + sha256(key.encode()).hexdigest()[:12]
+    alerts.sort(key=lambda alert: alert.timestamp, reverse=True)
+    incidents = correlate_incidents(alerts)
+    store = EvidenceStore(events, alerts, incidents)
+    scan_id = uuid4().hex
+    with SCAN_LOCK:
+        SCANS[scan_id] = store
+        while len(SCANS) > 32:
+            SCANS.popitem(last=False)
     result = ScanResult(
-        sample=request.sample,
+        sample=sample_name,
         event_count=len(events),
         alerts=alerts,
         ai_status="skipped",
+        scan_id=scan_id,
+        incidents=incidents,
     )
     if request.with_ai:
         try:
-            result.ai_analysis = analyze_security_scan(request.sample, events, alerts)
+            result.ai_analysis, result.investigation = analyze_security_scan(
+                sample_name, store, result.investigation, result.ai_warnings
+            )
             result.ai_status = "completed"
         except OllamaError as error:
             # Keep deterministic detections available if the optional local model is offline.
             result.ai_status = "unavailable"
             result.ai_error = str(error)
     return result
+
+
+def scan_store(scan_id: str) -> EvidenceStore:
+    with SCAN_LOCK:
+        store = SCANS.get(scan_id)
+    if store is None:
+        raise HTTPException(404, "掃描已不存在；重新掃描以建立證據快照")
+    return store
+
+
+@app.get("/api/scans/{scan_id}/evidence/{evidence_id}")
+def get_evidence(scan_id: str, evidence_id: str):
+    store = scan_store(scan_id)
+    for items in (store.events, store.alerts, store.incidents):
+        for item in items:
+            if item.id == evidence_id:
+                return item
+    raise HTTPException(404, "找不到本次掃描的證據")
+
+
+@app.get("/api/scans/{scan_id}/tools/{tool_name}")
+def investigate(scan_id: str, tool_name: str, source_ip: str | None = None,
+                username: str | None = None, start: str | None = None, end: str | None = None,
+                incident_id: str | None = None, limit: int = 40):
+    try:
+        return scan_store(scan_id).execute(tool_name, dict(source_ip=source_ip, username=username,
+                      start=start, end=end, incident_id=incident_id, limit=limit))
+    except ValueError as error:
+        raise HTTPException(422, "調查參數無效或工具不允許") from error
 
 
 @app.get("/api/ollama/status")
@@ -125,4 +187,12 @@ def dashboard() -> FileResponse:
     return FileResponse(FRONTEND / "index.html")
 
 
-app.mount("/", StaticFiles(directory=FRONTEND), name="frontend")
+# Serve only public assets; mounting the repository exposed source and local config.
+@app.get("/app.js", include_in_schema=False)
+def javascript() -> FileResponse:
+    return FileResponse(FRONTEND / "app.js", media_type="application/javascript")
+
+
+@app.get("/styles.css", include_in_schema=False)
+def stylesheet() -> FileResponse:
+    return FileResponse(FRONTEND / "styles.css", media_type="text/css")

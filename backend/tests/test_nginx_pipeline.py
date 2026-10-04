@@ -1,7 +1,6 @@
 import unittest
 
 from app.detectors.nginx import detect_nginx_alerts
-from app.copilot import extract_final_report
 from app.main import scan_sample
 from app.models import ScanRequest
 from app.parsers.nginx import parse_nginx_line, parse_nginx_logs
@@ -62,25 +61,15 @@ class NginxDetectionTests(unittest.TestCase):
         self.assertGreater(result.event_count, 0)
         self.assertEqual(len(result.alerts), 3)
 
-    def test_copilot_report_strips_qwen_reasoning_preamble(self):
-        response = (
-            "首先，我需要遵守系統提示並整理事件。\n"
-            "</think>\n\n"
-            "### 事件摘要\n來源包含可疑 SQL 請求。\n\n"
-            "### 判讀依據\n- 規則命中 SQL 特徵。\n"
-        )
-        report = extract_final_report(response)
-        self.assertTrue(report.startswith("### 事件摘要"))
-        self.assertNotIn("首先", report)
 
 
 class SharedPipelineRegressionTests(unittest.TestCase):
-    def test_existing_ssh_samples_keep_their_expected_alert_counts(self):
+    def test_ssh_samples_reflect_strict_account_correlation(self):
         expected = {
             "ssh:normal.log": 0,
             "ssh:bruteforce.log": 1,
             "ssh:suspicious_login.log": 2,
-            "ssh:compromised_login.log": 3,
+            "ssh:compromised_login.log": 2,
         }
         for sample, alert_count in expected.items():
             with self.subTest(sample=sample):

@@ -29,10 +29,13 @@ def parse_ssh_line(line: str, *, year: int | None = None) -> LogEvent | None:
     if auth is None:
         return None
 
-    timestamp = datetime.strptime(
-        f"{year or datetime.now().year} {match.group('month')} {match.group('day')} {match.group('time')}",
-        "%Y %b %d %H:%M:%S",
-    )
+    try:
+        timestamp = datetime.strptime(
+            f"{year or datetime.now().year} {match.group('month')} {match.group('day')} {match.group('time')}",
+            "%Y %b %d %H:%M:%S",
+        )
+    except ValueError:
+        return None
     return LogEvent(
         timestamp=timestamp,
         event_type="authentication_failed" if failed else "authentication_success",

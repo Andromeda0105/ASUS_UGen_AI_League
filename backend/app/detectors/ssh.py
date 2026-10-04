@@ -14,7 +14,8 @@ def detect_ssh_alerts(
 
     alerts: list[SecurityAlert] = []
     sequence = 1
-    for source_ip, source_events in by_ip.items():
+    for source_ip, source_events in sorted(by_ip.items()):
+        source_events.sort(key=lambda event: event.timestamp)
         failures = [event for event in source_events if event.event_type == "authentication_failed"]
         successes = [event for event in source_events if event.event_type == "authentication_success"]
 
@@ -43,7 +44,7 @@ def detect_ssh_alerts(
                         evidence=[evidence],
                         related_events=burst,
                         summary=f"來源 {source_ip} 在短時間內嘗試多次 SSH 驗證，行為符合自動化密碼猜測特徵。這代表攻擊嘗試，不代表已取得存取權。",
-                        recommendation="檢查 SSH 驗證政策與來源活動；確認只開放必要的管理入口。封鎖來源前請先確認不會影響合法管理流量。",
+                        recommendation="查閱 SSH 驗證日誌與來源活動，確認是否為合法管理或測試流量。",
                     )
                     alerts.append(active_brute_force_alert)
                     sequence += 1
@@ -58,7 +59,8 @@ def detect_ssh_alerts(
         for success in successes:
             prior_failures = [
                 event for event in failures
-                if timedelta(0) <= success.timestamp - event.timestamp <= timedelta(minutes=10)
+                if success.username is not None and event.username == success.username
+                and timedelta(0) < success.timestamp - event.timestamp <= timedelta(minutes=10)
             ]
             if len(prior_failures) < threshold:
                 continue
@@ -72,7 +74,7 @@ def detect_ssh_alerts(
                     severity=Severity.HIGH,
                     source_ip=source_ip,
                     username=success.username,
-                    evidence=[f"成功登入前 10 分鐘內有 {len(prior_failures)} 次失敗驗證", "成功登入來源與失敗嘗試來源相同"],
+                    evidence=[f"成功登入前 10 分鐘內有 {len(prior_failures)} 次失敗驗證", "成功登入來源與帳號均與失敗嘗試相同"],
                     related_events=related,
                     summary=f"來源 {source_ip} 在多次驗證失敗後成功登入帳號 {success.username}。這是可能帳號遭猜測的訊號，尚不能單憑此事件確認帳號已遭入侵。",
                     recommendation="向帳號擁有者確認這次登入，並檢視該 SSH session 後續執行的命令及權限提升活動。",

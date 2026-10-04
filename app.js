@@ -1,4 +1,5 @@
 let incidents=[];
+let currentScanId=null;
 
 let activeFilter='all'; let selectedId=null; let showAll=false;
 const rows=document.querySelector('#incident-rows');
@@ -39,7 +40,7 @@ function mapAlerts(alerts){return alerts.map(alert=>{
     source:escapeHtml(lastEvent?.source||'—'),user:escapeHtml(alert.username||'—'),count:`${related.length} 筆關聯事件`,
     requestMethod:escapeHtml(lastEvent?.request_method||''),requestTarget:escapeHtml(lastEvent?.request_target||''),
     statusCode:escapeHtml(lastEvent?.status_code||''),
-    summary:escapeHtml(alert.summary),raw:escapeHtml(lastEvent?.raw_log||''),
+    summary:escapeHtml(alert.summary),raw:related.map(event=>`${escapeHtml(event.id)} · ${escapeHtml(event.raw_log)}`).join('<br><br>'),
     recommendation:escapeHtml(alert.recommendation),
   };
 })}
@@ -54,6 +55,8 @@ async function loadDetectedAlerts(){
     if(samplesResponse.ok){
       const samples=await samplesResponse.json();
       document.querySelector('#sample-select').innerHTML=samples.map(sample=>`<option value="${escapeHtml(sample.name)}">${escapeHtml(sample.label)}</option>`).join('');
+      const initial=await fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sample:samples[0].name,with_ai:false})});
+      if(initial.ok){const result=await initial.json();updateAlerts(result.alerts);currentScanId=result.scan_id;renderCorrelations(result.incidents);document.querySelector('#stat-events').textContent=result.event_count;document.querySelector('#event-count-foot').textContent='目前樣本解析筆數'}
     }
     if(ollamaResponse.ok){
       const state=await ollamaResponse.json();
@@ -68,23 +71,26 @@ async function scanSelectedSample(){
   const output=document.querySelector('#ai-analysis');
   const status=document.querySelector('#copilot-status');
   button.disabled=true;button.innerHTML='◌ <span>正在偵測與分析…</span>';
-  output.className='analysis-content loading';output.textContent='規則引擎正在分析 SSH 事件，接著會呼叫本機 Ollama…';
+  output.className='analysis-content loading';output.textContent='規則引擎正在偵測與關聯日誌，接著會呼叫本機 Ollama 進行唯讀調查…';
   status.textContent='分析工作進行中；日誌原文不會送入模型。';
   try{
     const response=await fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sample:document.querySelector('#sample-select').value,with_ai:true})});
     const result=await response.json();
     if(!response.ok)throw new Error(result.detail||`HTTP ${response.status}`);
     updateAlerts(result.alerts);
+    currentScanId=result.scan_id;
+    renderCorrelations(result.incidents||[]);
     document.querySelector('#stat-events').textContent=result.event_count;
     document.querySelector('#event-count-foot').textContent='目前樣本解析筆數';
     const sampleLabel=document.querySelector('#sample-select').selectedOptions[0]?.textContent||result.sample;
     if(result.ai_status==='completed'){
-      output.className='analysis-content';output.textContent=result.ai_analysis;
-      status.textContent=`分析完成 · ${sampleLabel} · ${result.event_count} 筆解析事件、${result.alerts.length} 個規則告警`;
+      output.className='analysis-content';renderAnalysis(result.ai_analysis,result.investigation||[],result.ai_warnings||[]);
+      status.textContent=`分析完成 · ${sampleLabel} · ${result.event_count} 筆解析事件、${result.alerts.length} 個規則告警、${result.incidents.length} 個 Incident`;
     }else{
       output.className='analysis-content error';
-      output.textContent=`偵測完成，共解析 ${result.event_count} 筆事件、產生 ${result.alerts.length} 個告警。\n\nAI 分析暫不可用：${result.ai_error||'本機模型未回應'}\n\n啟動 Ollama 後可重新按「偵測並分析」。`;
-      status.textContent=`規則偵測完成 · ${sampleLabel} · AI 尚未連線`;
+      output.textContent=`偵測完成，共解析 ${result.event_count} 筆事件、產生 ${result.alerts.length} 個告警。\n\nAI 分析暫不可用：${result.ai_error||'本機模型未回應'}\n\n請檢查 Ollama 或分析錯誤，然後重新按「偵測並分析」。`;
+      if(result.investigation?.length)output.innerHTML+=toolTraceMarkup(result.investigation);
+      status.textContent=`規則偵測完成 · ${sampleLabel} · AI 分析未完成`;
     }
   }catch(error){
     output.className='analysis-content error';output.textContent=`無法完成掃描：${error.message}`;status.textContent='本機 API 無法連線，請確認後端服務已啟動。';
@@ -92,3 +98,31 @@ async function scanSelectedSample(){
 }
 document.querySelector('#scan-button').addEventListener('click',scanSelectedSample);
 loadDetectedAlerts();
+
+const stageLabels={web_reconnaissance:'Web 探測',credential_attack:'SSH 密碼猜測',suspicious_authentication:'可疑成功登入',web_exploitation_attempt:'Web 漏洞利用嘗試'};
+function evidenceButton(id){return `<button class="evidence-link" data-evidence="${escapeHtml(id)}">${escapeHtml(id)}</button>`}
+function bindEvidence(container){container.querySelectorAll('[data-evidence]').forEach(button=>button.addEventListener('click',()=>showEvidence(button.dataset.evidence)))}
+function renderCorrelations(items){
+  const container=document.querySelector('#correlated-incidents');
+  container.innerHTML=items.length?items.map(item=>`<article class="incident-card"><div class="title-inline"><span class="severity ${severityClass[item.severity]}">${severityLabel[item.severity]}</span><h3>${escapeHtml(item.title)}</h3></div><p>${escapeHtml(item.source_ips.join(', '))} · ${escapeHtml(item.usernames.join(', ')||'無帳號資料')} · ${evidenceButton(item.id)}</p><p>${escapeHtml(item.correlation_reason)}</p><ol class="attack-timeline">${item.timeline.map(entry=>`<li><time>${timeLabel(entry.timestamp)}</time> <b>${escapeHtml(stageLabels[entry.stage]||entry.stage)}</b> ${evidenceButton(entry.alert_id)}<div>${entry.event_ids.map(evidenceButton).join(' ')}</div></li>`).join('')}</ol></article>`).join(''):'沒有規則告警，因此沒有建立 Incident。';
+  bindEvidence(container);
+}
+function toolTraceMarkup(trace){return `<details><summary>唯讀工具查詢紀錄（${trace.length} 次）</summary><pre>${escapeHtml(JSON.stringify(trace,null,2))}</pre></details>`}
+function renderAnalysis(analysis,trace,warnings=[]){
+  const container=document.querySelector('#ai-analysis');
+  function claims(items){return `<ul>${items.map(claim=>`<li>${escapeHtml(claim.text)}<div>${claim.evidence_ids.map(evidenceButton).join(' ')}</div></li>`).join('')}</ul>`}
+  container.innerHTML=`<p class="analysis-confidence">判讀界線：攻擊嘗試與成功驗證不等於已確認惡意入侵；仍需查證主機與帳號活動。</p><h3>事件摘要</h3><p>${escapeHtml(analysis.summary)}</p><h3>判讀依據</h3>${claims(analysis.assessment)}<h3>建議調查（唯讀）</h3>${claims(analysis.recommendations)}<h3>尚缺證據</h3><ul>${analysis.missing_evidence.map(item=>`<li>${escapeHtml(item)}</li>`).join('')}</ul><p class="analysis-confidence">模型分析完整度自評：${Math.round(analysis.confidence*100)}%（非入侵機率）</p>${warnings.map(note=>`<p class="analysis-confidence">${escapeHtml(note)}</p>`).join('')}${toolTraceMarkup(trace)}`;
+  bindEvidence(container);
+}
+async function showEvidence(id){
+  const dialog=document.querySelector('#evidence-dialog');
+  const content=document.querySelector('#evidence-content');
+  content.textContent='正在讀取本次掃描證據…';
+  if(!dialog.open)dialog.showModal();
+  try{
+    const response=await fetch(`/api/scans/${encodeURIComponent(currentScanId)}/evidence/${encodeURIComponent(id)}`);
+    if(!response.ok)throw new Error('證據快照已不存在，請重新掃描。');
+    content.textContent=JSON.stringify(await response.json(),null,2);
+  }catch(error){content.textContent=error.message}
+}
+document.querySelector('#close-evidence').addEventListener('click',()=>document.querySelector('#evidence-dialog').close());

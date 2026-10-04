@@ -2,7 +2,7 @@ import re
 from collections import defaultdict
 from datetime import timedelta
 from html import unescape
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote_plus, urlsplit
 
 from app.models import LogEvent, SecurityAlert, Severity
 
@@ -10,7 +10,7 @@ from app.models import LogEvent, SecurityAlert, Severity
 def _decoded_target(event: LogEvent) -> str:
     value = event.request_target or ""
     for _ in range(3):
-        decoded = unescape(unquote(value))
+        decoded = unescape(unquote_plus(value))
         if decoded == value:
             break
         value = decoded
@@ -19,16 +19,15 @@ def _decoded_target(event: LogEvent) -> str:
 
 SQLI_PATTERNS = [
     ("UNION SELECT", re.compile(r"\bunion\s+(?:all\s+)?select\b", re.IGNORECASE)),
-    ("OR/AND boolean tautology", re.compile(r"\b(?:or|and)\s+['\"]?\w+['\"]?\s*=\s*['\"]?\w+", re.IGNORECASE)),
+    ("OR/AND boolean tautology", re.compile(r"\b(?:or|and)\s+['\"]?(\w+)['\"]?\s*=\s*['\"]?\1\b", re.IGNORECASE)),
     ("time-delay function", re.compile(r"\b(?:sleep|benchmark|pg_sleep)\s*\(", re.IGNORECASE)),
     ("information_schema reference", re.compile(r"\binformation_schema\b", re.IGNORECASE)),
     ("destructive SQL statement", re.compile(r"\b(?:drop|truncate)\s+(?:table|database)\b", re.IGNORECASE)),
-    ("SQL comment marker", re.compile(r"(?:--|/\*.*?\*/|%23|#\s*$)", re.IGNORECASE)),
+    ("SQL comment marker", re.compile(r"['\"]\s*(?:--|/\*|#)", re.IGNORECASE)),
 ]
 
 XSS_PATTERNS = [
     ("script tag", re.compile(r"<\s*script\b", re.IGNORECASE)),
-    ("HTML element payload", re.compile(r"<\s*(?:svg|img|iframe|object|body)\b", re.IGNORECASE)),
     ("inline event handler", re.compile(r"\bon(?:error|load|click|mouseover)\s*=", re.IGNORECASE)),
     ("javascript URL", re.compile(r"javascript\s*:", re.IGNORECASE)),
 ]
@@ -117,7 +116,11 @@ class EnumerationDetector:
         for event in events:
             if not event.request_target:
                 continue
-            path = urlsplit(_decoded_target(event)).path.lower()
+            try:
+                path = urlsplit(_decoded_target(event)).path.lower()
+            except ValueError:
+                # Malformed attacker-controlled URI must not abort the entire scan.
+                continue
             if any(pattern.search(path) for pattern in ENUMERATION_PATHS):
                 by_ip[event.source_ip].append((event, path))
 
