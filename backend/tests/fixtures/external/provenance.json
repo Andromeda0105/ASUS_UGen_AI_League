@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/logpai/loghub",
+  "commit": "374038faa4ca122dd7ca0730372c0b78f76f8597",
+  "files": {
+    "OpenSSH_2k.log": {
+      "url": "https://raw.githubusercontent.com/logpai/loghub/374038faa4ca122dd7ca0730372c0b78f76f8597/OpenSSH/OpenSSH_2k.log",
+      "sha256": "1e4912727fa88245113d41b16a0cd25ceadba7f931e1c406542885b91254264f"
+    },
+    "LOGHUB_LICENSE": {
+      "url": "https://raw.githubusercontent.com/logpai/loghub/374038faa4ca122dd7ca0730372c0b78f76f8597/LICENSE",
+      "sha256": "b3342581f3747ae0eea2b05d58aba956e5bd21238d5447aa758acd8da175393f"
+    }
+  }
+}

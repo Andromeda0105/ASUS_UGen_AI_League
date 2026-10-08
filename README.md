@@ -18,7 +18,7 @@ SSH / Nginx logs → Parsers → LogEvent → Detectors → SecurityAlert
 
 ## 啟動
 
-需要 Python 3.11+、Ollama，以及已下載的 `qwen3:4b`。
+需要 Python 3.11+。Ollama 與 `qwen3:4b` 僅供可選的 AI 分析；匯入、規則偵測、調查及匯出均可離線使用。
 
 ```sh
 # Ollama 已啟動時不用重複執行
@@ -34,7 +34,7 @@ python -m pip install -e ./backend
 uvicorn app.main:app --app-dir backend --reload
 ```
 
-已建立虛擬環境時只需啟用環境並啟動 Uvicorn。開啟 <http://127.0.0.1:8000>；API 文件在 <http://127.0.0.1:8000/docs>。
+已建立虛擬環境者，本次升級請先執行 `.venv/bin/pip install -e ./backend` 安裝 multipart 相依套件，再重新啟動 Uvicorn。開啟 <http://127.0.0.1:8000>；API 文件在 <http://127.0.0.1:8000/docs>。
 
 環境變數：
 
@@ -47,7 +47,60 @@ uvicorn app.main:app --app-dir backend --reload
 
 SSH 樣本目前以 2026 年解析；Nginx 使用日誌內的年份與 offset。跨來源日誌必須來自同一主機／同一分析範圍，且時間設定一致。
 
-## 查看新功能
+## MVP：匯入 → 調查 → 匯出 → 重開
+
+1. 在「匯入本機日誌」選擇一或多個檔案，各檔分別選 `SSH authentication` 或 `Nginx combined access`。不使用自動格式辨識。
+2. SSH syslog 不含年份，請填入實際 **SSH 年份**；主機時區由 `LOG_TIMEZONE` 設定。示範 `samples/scenarios/multi_stage_auth.log` 的年份填 `2026`。Nginx 直接使用日誌內年份與時區 offset。
+3. 建議先取消「使用 AI」，按「匯入並偵測」。每檔會顯示接受／跳過行數、重複行數，以及最多 100 筆含行號的診斷；更多診斷會顯示省略數。空檔或編碼錯誤的檔案會標示未接受，其他有效檔案仍可成功匯入。全部無效時回傳錯誤，不新增歷史。
+4. 在 Incident 清單按「選擇此 Incident」，時間線、假說、圖形與 AI 評估會同步切換。點選證據 ID 可查看正規化欄位與原始日誌。
+5. 按「唯讀調查」，或選某個問題的「唯讀查詢」。畫面顯示本輪預算、查詢答案與停止原因；有 Ollama 時可按「AI 比較假說」。
+6. 按 Incident 旁或調查區的「下載 Markdown」，取得包含證據附錄、假說、未回答問題與不確定性的報告。沒有 AI 也能下載；模型判讀另行標示為推論。
+7. 「掃描歷史」可開啟先前結果，恢復已回答問題與 AI 分析，不會重新呼叫模型。重新啟動後端後，頁面預設重開最近一筆；空歷史第一次載入會建立跨來源示範掃描。
+8. 使用「刪除」移除指定掃描及其證據／調查紀錄，其他掃描不受影響。告警詳情的狀態標記仍僅供當頁使用，未儲存。
+
+快速示範：同時選擇 `samples/scenarios/multi_stage_access.log`（Nginx）與 `samples/scenarios/multi_stage_auth.log`（SSH，2026），預期 **10 筆事件、3 個告警、1 個 Incident**。
+
+匯入規則與限制：UTF-8 / UTF-8 BOM、SSH 的 `Failed password`／`Accepted password|publickey|keyboard-interactive/pam`、Nginx **combined** 格式。其他 SSH 訊息會標示跳過；不會展開 `message repeated N times` 為 N 個獨立事件。完全相同的正規化事件 ID 會去重；保留單檔接受數與整次去重數。多個主機／不同年份的 SSH 日誌請分次匯入；本輪 SSH 檔案共用同一年份與主機時區。
+
+| 設定 | 預設 | 用途 |
+| --- | --- | --- |
+| `COPILOT_DB_PATH` | `data/copilot.sqlite3` | 本機 SQLite 路徑 |
+| `UPLOAD_MAX_FILES` | `8` | 每次檔案數 |
+| `UPLOAD_MAX_FILE_BYTES` | `2097152` | 單檔 2 MiB |
+| `UPLOAD_MAX_TOTAL_BYTES` | `8388608` | 合計 8 MiB |
+| `UPLOAD_MAX_LINES` | `10000` | 每檔行數；超出則拒絕本次匯入 |
+| `UPLOAD_MAX_LINE_BYTES` | `16384` | 單行長度；超出則標示跳過 |
+
+環境變數需在啟動前設定。檔案超過大小／總量限制回傳 413；不支援類型或全部無法解析回傳 422。大量事件的完整圖形可能較慢，預設以 Incident 範圍並隱藏事件節點。
+
+### 本機保存與保留行為
+
+SQLite 的 `scans` 保存 metadata、alerts、incidents、假說和調查結果的 JSON；`events` 保存逐筆正規化事件與原始日誌，以 scan ID 外鍵串連並連動刪除。每次儲存使用交易，提交成功後才將掃描公開；資料庫寫入失敗回傳 503，不顯示已完成。重新載入時保留證據 ID，從證據重建圖形，恢復已回答問題與模型結果。
+
+沒有自動到期政策：掃描會保留至使用者刪除。`data/` 已排除 Git；原始上傳檔案不另存，解析成功行的原文會保存在 SQLite。未解析的行只保留診斷，不保存原文。SQLite 是本機明文檔案，新增檔案使用僅擁有者讀寫權限；不把原始日誌寫入 browser storage 或應用程式例行日誌。刪除是資料庫邏輯刪除，不能保證備份或磁碟殘留被抹除。下載報告也包含原始證據。
+
+此版本定位為單一使用者的本機服務，請維持預設 `127.0.0.1` 綁定；尚未提供多人權限／主機身份管理。圖形重建使用目前版本規則，之後升級規則可能改變衍生關係，原始證據 ID 不變。
+
+### 新增 API
+
+- `GET /api/import/config`：匯入限制、預設 SSH 年份與主機時區。
+- `POST /api/scans/upload`：multipart，多個 `files` 與順序一致的 `source_types`，另傳 `ssh_year`、`with_ai`、`tool_budget`。
+- `GET /api/scans?limit=20&offset=0`：分頁歷史 metadata；不傳回原始日誌。
+- `GET /api/scans/{scan_id}`：重開完整掃描結果與保存的各 Incident 調查結果。
+- `DELETE /api/scans/{scan_id}`：刪除指定掃描。
+- `GET /api/scans/{scan_id}/incidents/{incident_id}/report.md`：下載證據可追溯的 Markdown。
+
+```sh
+curl -X POST http://127.0.0.1:8000/api/scans/upload \
+  -F 'files=@samples/scenarios/multi_stage_access.log' -F 'source_types=nginx' \
+  -F 'files=@samples/scenarios/multi_stage_auth.log' -F 'source_types=ssh' \
+  -F 'ssh_year=2026' -F 'with_ai=false'
+
+curl http://127.0.0.1:8000/api/scans
+curl 'http://127.0.0.1:8000/api/scans/SCAN_ID/incidents/INCIDENT_ID/report.md' -o incident.md
+```
+
+## 查看證據圖與假說
 
 1. 選擇 **跨來源 · Web 探測 → SSH 可疑登入**。建議先取消勾選 **使用 AI**，按 **偵測並分析**，立即查看結果。
 2. 原有偵測結果仍為 **10 筆事件、3 個告警、1 個 Critical Incident**。
@@ -171,14 +224,17 @@ curl -X POST 'http://127.0.0.1:8000/api/scans/SCAN_ID/incidents/INCIDENT_ID/inve
   -d '{"with_ai":false,"tool_budget":4}'
 ```
 
-快照只在單一後端程序記憶體中保留最近 32 次掃描；重啟／reload 或淘汰後須重新掃描。本階段請使用單一 Uvicorn worker。
+掃描與調查結果持續儲存在 SQLite，重啟／reload 後可以重開；記憶體只快取最近 32 次掃描。此 MVP 請使用單一 Uvicorn worker，避免不同程序的快取互相覆寫調查結果。
 
 ## 連線排查與驗證
+
+測試需先安裝 `.venv/bin/pip install -e './backend[test]'`。完整測試與評估不使用 Ollama；請參閱 [docs/evaluation.md](docs/evaluation.md) 的資料來源、實測數字與限制。
+
 
 從**執行 Uvicorn 的環境**執行 `curl http://127.0.0.1:11434/api/tags`。容器／sandbox 的 `127.0.0.1` 不一定是主機；可在主機終端執行後端，或設定該環境可達的 `OLLAMA_BASE_URL`。
 
 ```sh
-PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v
+COPILOT_DB_PATH=/tmp/copilot-regression.sqlite3 PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v
 node --check app.js
 node --check graph.js
 node --check hypotheses.js
@@ -186,7 +242,7 @@ node --check hypotheses.js
 PYTHONPATH=backend .venv/bin/python scripts/browser_smoke.py
 ```
 
-目前沒有即時收集、firewall／auditd／process 日誌或主機行為基線。事件專屬欄位仍保留相容的現有模型，尚未全面遷移至 attributes。活動／威脅分布圖仍為標示過的展示圖表。
+目前沒有即時收集、firewall／auditd／process 日誌或主機行為基線。事件專屬欄位仍保留相容的現有模型，尚未全面遷移至 attributes。原先展示用的活動／威脅分布圖已替換為匯入、歷史與目前掃描資訊。
 
 
 ## 新功能實作位置
@@ -197,6 +253,9 @@ PYTHONPATH=backend .venv/bin/python scripts/browser_smoke.py
 | `backend/app/graph.py` | 從 EvidenceStore 建立有證據引用的確定性圖形 |
 | `backend/app/hypotheses.py` | 競爭假說模板、證據分類、觀察事實與問題 |
 | `backend/app/investigator.py` | 有界問題選擇、唯讀查詢、停止條件與 AI 比較驗證 |
+| `backend/app/importer.py` | 有上限的匯入與逐行診斷 |
+| `backend/app/storage.py` | SQLite 交易保存、恢復、歷史與刪除 |
+| `backend/app/reports.py` | Incident Markdown 匯出，原始日誌作為 literal data |
 | `graph.js` | SVG 關係圖、節點／邊證據導航、篩選與假說高亮 |
 | `hypotheses.js` | 競爭假說卡片、觀察事實、缺少證據與問題互動 |
 

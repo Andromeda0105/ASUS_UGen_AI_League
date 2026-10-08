@@ -1,0 +1,85 @@
+{
+  "environment": {
+    "python": "3.14.7",
+    "platform": "Linux-7.2.7-arch1-1-x86_64-with-glibc2.44",
+    "fastapi": "0.141.1",
+    "sqlite": "3.53.4",
+    "ollama": "disabled",
+    "ssh_year": 2026,
+    "log_timezone": "Asia/Taipei"
+  },
+  "cases": [
+    {
+      "name": "synthetic_multistage",
+      "group": "synthetic",
+      "total_lines": 10,
+      "accepted_lines": 10,
+      "skipped_lines": 0,
+      "parser_accept_rate": 1.0,
+      "unique_events": 10,
+      "alerts": 3,
+      "incidents": 1,
+      "import_latency_ms": 11.15,
+      "evidence_references_checked": 134,
+      "invalid_evidence_references": 0,
+      "rule_expectation_grouping_exact_match": true
+    },
+    {
+      "name": "synthetic_benign",
+      "group": "synthetic",
+      "total_lines": 12,
+      "accepted_lines": 10,
+      "skipped_lines": 2,
+      "parser_accept_rate": 0.833333,
+      "unique_events": 10,
+      "alerts": 0,
+      "incidents": 0,
+      "import_latency_ms": 3.54,
+      "evidence_references_checked": 30,
+      "invalid_evidence_references": 0,
+      "benign_expected_zero_alerts": true
+    },
+    {
+      "name": "external_openssh",
+      "group": "external_unlabeled",
+      "total_lines": 2000,
+      "accepted_lines": 520,
+      "skipped_lines": 1480,
+      "parser_accept_rate": 0.26,
+      "unique_events": 520,
+      "alerts": 11,
+      "incidents": 10,
+      "import_latency_ms": 50.0,
+      "evidence_references_checked": 2602,
+      "invalid_evidence_references": 0
+    },
+    {
+      "name": "controlled_http",
+      "group": "controlled_lab_pattern_labeled",
+      "total_lines": 4,
+      "accepted_lines": 4,
+      "skipped_lines": 0,
+      "parser_accept_rate": 1.0,
+      "unique_events": 4,
+      "alerts": 2,
+      "incidents": 1,
+      "import_latency_ms": 2.74,
+      "evidence_references_checked": 44,
+      "invalid_evidence_references": 0,
+      "labeled_pattern_metrics": {
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "note": "4-request controlled pattern fixture only; not production accuracy"
+      }
+    }
+  ],
+  "definitions": {
+    "parser_rate": "accepted input lines / total lines; unsupported SSH telemetry counts as skipped",
+    "latency": "one measured local TestClient request including import, graph, hypotheses and transactional SQLite write",
+    "labels": "only controlled HTTP request intent labels; no compromise/exploitation ground truth",
+    "grouping": "synthetic rule expectation only; no externally labeled campaign grouping"
+  }
+}

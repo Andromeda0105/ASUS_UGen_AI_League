@@ -24,6 +24,7 @@ window.HypothesisPanel=(()=>{
   }
   function setData(data,preferred){reports=data||[];selectedIncident=reports.some(r=>r.incident_id===preferred)?preferred:(reports.some(r=>r.incident_id===selectedIncident)?selectedIncident:reports[0]?.incident_id||null);selectedHypothesis=null;const select=el('hypothesis-incident');select.replaceChildren();reports.forEach(report=>{const option=document.createElement('option');option.value=report.incident_id;option.textContent=report.incident_id;select.append(option)});select.value=selectedIncident||'';render();applyGraphFocus()}
   function replaceReport(report){reports=reports.map(r=>r.incident_id===report.incident_id?report:r);selectedIncident=report.incident_id;el('hypothesis-incident').value=selectedIncident;render();applyGraphFocus()}
-  function init(){el('hypothesis-incident').addEventListener('change',event=>{selectedIncident=event.target.value;selectedHypothesis=null;render();applyGraphFocus()});el('read-investigate').addEventListener('click',()=>runSelectedIncident(false));el('ai-investigate').addEventListener('click',()=>runSelectedIncident(true));render()}
-  return {init,setData,replaceReport,setBusy,applyGraphFocus,selectedId:()=>selectedIncident};
+  function chooseIncident(id){if(!reports.some(r=>r.incident_id===id))return;selectedIncident=id;selectedHypothesis=null;el('hypothesis-incident').value=id;render();applyGraphFocus()}
+  function init(){el('hypothesis-incident').addEventListener('change',event=>{chooseIncident(event.target.value);selectInvestigationIncident(event.target.value,false)});el('read-investigate').addEventListener('click',()=>runSelectedIncident(false));el('ai-investigate').addEventListener('click',()=>runSelectedIncident(true));render()}
+  return {init,setData,replaceReport,setBusy,applyGraphFocus,chooseIncident,selectedId:()=>selectedIncident};
 })();

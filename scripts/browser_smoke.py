@@ -14,6 +14,9 @@ from app.main import app, ROOT
 
 work = Path(tempfile.mkdtemp(prefix='copilot-browser-',dir='/tmp'))
 result_path = work/'result.json'
+os.environ['COPILOT_DB_PATH']=str(work/'browser.sqlite3')
+from app.main import SCANS
+SCANS.clear()
 script = r'''
 (async()=>{
 const results=[];function check(name,ok){if(!ok)throw new Error(name);results.push(name)};
@@ -51,11 +54,44 @@ const reports=structuredClone(scan.hypotheses);reports[0].hypotheses[0].descript
 HypothesisPanel.setData(reports,scan.focused_incident_id);
 check('hypothesis strings escaped',!document.querySelector('#hypothesis-cards script')&&!window.__hypInjected);
 SecurityGraph.setData(graph);HypothesisPanel.setData(scan.hypotheses,scan.focused_incident_id);
+
+// Complete the MVP workflow through dashboard controls.
+const fixtures=await (await fetch('/__fixtures')).json();
+const transfer=new DataTransfer();
+transfer.items.add(new File([fixtures.nginx], 'my_access.log', {type:'text/plain'}));
+transfer.items.add(new File([fixtures.ssh+'malformed line\n'], 'my_auth.log', {type:'text/plain'}));
+const input=document.querySelector('#upload-files');input.files=transfer.files;input.dispatchEvent(new Event('change'));
+document.querySelector('#ssh-year').value='2026';document.querySelector('#scan-with-ai').checked=false;
+const oldScan=currentScanId;document.querySelector('#upload-button').click();
+await waitFor(()=>currentScanId!==oldScan&&!workflowBusy);
+check('UI imports two custom logs',document.querySelector('#stat-events').textContent==='10');
+check('UI shows line-number diagnostics',document.querySelector('#import-feedback').textContent.includes('第 7 行'));
+check('incident context selected',document.querySelectorAll('.selected-context').length===1&&HypothesisPanel.selectedId()===selectedCorrelationId);
+const reportLink=document.querySelector('#download-selected-report');
+check('report action available',!reportLink.hidden);
+const markdown=await (await fetch(reportLink.href)).text();
+check('offline Markdown download',markdown.includes('Incident 調查報告')&&markdown.includes('沒有可用的 AI 評估'));
+document.querySelector('[data-question]:not([data-unavailable="true"])').click();
+await waitFor(()=>!workflowBusy&&document.querySelector('#investigation-stop').textContent.includes('1 / 1'));
+check('UI selected question obeys budget',document.querySelector('#investigation-stop').textContent.includes('1 / 1'));
+const importedId=currentScanId;
+check('import persisted in history',!!document.querySelector(`[data-open-scan="${importedId}"]`));
+await openSavedScan(scan.scan_id);await openSavedScan(importedId);
+check('reopen preserves answered question',Array.from(document.querySelectorAll('[data-question]')).some(b=>b.textContent==='已查證'));
+window.confirm=()=>true;await deleteSavedScan(importedId);
+check('delete clears current workspace',currentScanId===null&&document.querySelector('#scan-overview').textContent.includes('已刪除'));
+check('other history scan remains',!!document.querySelector(`[data-open-scan="${scan.scan_id}"]`));
+await openSavedScan(scan.scan_id);
+check('remaining scan reopens',currentScanId===scan.scan_id);
 await fetch('/__ui-result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ok:true,results})});
 }catch(error){await fetch('/__ui-result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ok:false,error:error.message,stack:error.stack,results})})}
 })();
 '''
 (work/'test.js').write_text(script)
+@app.get('/__fixtures',include_in_schema=False)
+async def fixtures():
+    directory=ROOT/'samples/scenarios'
+    return {'nginx':(directory/'multi_stage_access.log').read_text(),'ssh':(directory/'multi_stage_auth.log').read_text()}
 @app.get('/__ui-test',include_in_schema=False)
 async def harness():
     page=(ROOT/'index.html').read_text().replace('</body>','<script src="/__ui-test.js"></script></body>')

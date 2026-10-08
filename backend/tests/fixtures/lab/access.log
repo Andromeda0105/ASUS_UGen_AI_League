@@ -1,0 +1,4 @@
+127.0.0.1 - - [08/Oct/2026:21:12:31 +0000] "GET /health HTTP/1.1" 200 2 "-" "controlled-lab"
+127.0.0.1 - - [08/Oct/2026:21:12:31 +0000] "GET /search?q=select+database+union HTTP/1.1" 200 2 "-" "controlled-lab"
+127.0.0.1 - - [08/Oct/2026:21:12:31 +0000] "GET /search?q=1%27+OR+%271%27=%271 HTTP/1.1" 200 2 "-" "controlled-lab"
+127.0.0.1 - - [08/Oct/2026:21:12:31 +0000] "GET /search?q=%3Cscript%3Ealert(1)%3C/script%3E HTTP/1.1" 200 2 "-" "controlled-lab"

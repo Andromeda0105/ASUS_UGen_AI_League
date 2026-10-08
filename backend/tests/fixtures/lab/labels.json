@@ -1,0 +1,28 @@
+{
+  "source": "scripts/collect_lab.py",
+  "capture_kind": "real loopback HTTP requests; Python server emits Nginx combined log format",
+  "not_real_nginx": true,
+  "not_exploitation_ground_truth": true,
+  "cases": [
+    {
+      "line": 1,
+      "target": "/health",
+      "expected": "benign"
+    },
+    {
+      "line": 2,
+      "target": "/search?q=select+database+union",
+      "expected": "benign"
+    },
+    {
+      "line": 3,
+      "target": "/search?q=1%27+OR+%271%27=%271",
+      "expected": "sqli_attempt"
+    },
+    {
+      "line": 4,
+      "target": "/search?q=%3Cscript%3Ealert(1)%3C/script%3E",
+      "expected": "xss_attempt"
+    }
+  ]
+}

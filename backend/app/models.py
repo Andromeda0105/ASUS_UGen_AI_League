@@ -117,6 +117,11 @@ class ScanResult(BaseModel):
     ai_warnings: list[str] = Field(default_factory=list)
     hypotheses: list[HypothesisReport] = Field(default_factory=list)
     focused_incident_id: str | None = None
+    created_at: datetime | None = None
+    source_types: list[str] = Field(default_factory=list)
+    file_results: list[dict] = Field(default_factory=list)
+    duplicate_event_count: int = 0
+    investigation_results: dict[str, "IncidentInvestigationResult"] = Field(default_factory=dict)
 
 
 class IncidentInvestigationResult(BaseModel):
@@ -127,3 +132,6 @@ class IncidentInvestigationResult(BaseModel):
     ai_error: str | None = None
     ai_warnings: list[str] = Field(default_factory=list)
     investigation: list[dict] = Field(default_factory=list)
+
+
+ScanResult.model_rebuild()
