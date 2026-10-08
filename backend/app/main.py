@@ -15,7 +15,10 @@ from app.incidents import correlate_incidents
 from app.evidence import EvidenceStore
 from app.detectors.nginx import detect_nginx_alerts
 from app.detectors.ssh import detect_ssh_alerts
-from app.copilot import OllamaError, analyze_security_scan
+from app.copilot import OllamaError, analyze_security_scan as legacy_analyze_security_scan
+from app.investigator import run_hypothesis_investigation
+from app.intelligence_models import InvestigationRequest, EvidenceGraph, HypothesisReport
+from app.models import IncidentInvestigationResult
 from app.models import LogEvent, ScanRequest, ScanResult, SecurityAlert
 from app.parsers.nginx import parse_nginx_logs
 from app.parsers.ssh import parse_ssh_logs
@@ -95,6 +98,24 @@ def get_samples() -> list[dict[str, str]]:
     ]
 
 
+def priority_incident(store):
+    ranks = {"Critical": 3, "High": 2, "Medium": 1}
+    return max(store.incidents, key=lambda i: (ranks.get(i.severity, 0), i.end_time), default=None)
+
+
+def analyze_security_scan(sample_name, store, trace, warnings, tool_budget=4):
+    incident = priority_incident(store)
+    if incident is None:
+        return legacy_analyze_security_scan(sample_name, store, trace, warnings)
+    with store.investigation_lock:
+        result = run_hypothesis_investigation(store, incident.id, with_ai=True, tool_budget=tool_budget)
+    trace.extend(result.investigation)
+    warnings.extend(result.ai_warnings)
+    if result.ai_status != "completed":
+        raise OllamaError(result.ai_error or "AI 比較未完成，唯讀證據與假說仍可查看。")
+    return result.ai_analysis, trace
+
+
 @app.post("/api/scan", response_model=ScanResult)
 def scan_sample(request: ScanRequest) -> ScanResult:
     sample_names = request.samples if request.samples is not None else [request.sample]
@@ -122,17 +143,19 @@ def scan_sample(request: ScanRequest) -> ScanResult:
         ai_status="skipped",
         scan_id=scan_id,
         incidents=incidents,
+        focused_incident_id=priority_incident(store).id if store.incidents else None,
     )
     if request.with_ai:
         try:
             result.ai_analysis, result.investigation = analyze_security_scan(
-                sample_name, store, result.investigation, result.ai_warnings
+                sample_name, store, result.investigation, result.ai_warnings, request.tool_budget
             )
             result.ai_status = "completed"
         except OllamaError as error:
             # Keep deterministic detections available if the optional local model is offline.
             result.ai_status = "unavailable"
             result.ai_error = str(error)
+    result.hypotheses = list(store.hypothesis_reports.values())
     return result
 
 
@@ -142,6 +165,29 @@ def scan_store(scan_id: str) -> EvidenceStore:
     if store is None:
         raise HTTPException(404, "掃描已不存在；重新掃描以建立證據快照")
     return store
+
+
+@app.get("/api/scans/{scan_id}/hypotheses", response_model=list[HypothesisReport])
+def get_hypotheses(scan_id: str):
+    return list(scan_store(scan_id).hypothesis_reports.values())
+
+
+@app.post("/api/scans/{scan_id}/incidents/{incident_id}/investigate", response_model=IncidentInvestigationResult)
+def investigate_incident(scan_id: str, incident_id: str, request: InvestigationRequest):
+    store = scan_store(scan_id)
+    if incident_id not in store.hypothesis_reports:
+        raise HTTPException(404, "找不到本次掃描的 Incident")
+    try:
+        with store.investigation_lock:
+            return run_hypothesis_investigation(store, incident_id, with_ai=request.with_ai,
+                                               tool_budget=request.tool_budget, question_ids=request.question_ids)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
+@app.get("/api/scans/{scan_id}/graph", response_model=EvidenceGraph)
+def get_graph(scan_id: str):
+    return scan_store(scan_id).graph
 
 
 @app.get("/api/scans/{scan_id}/evidence/{evidence_id}")
@@ -196,3 +242,13 @@ def javascript() -> FileResponse:
 @app.get("/styles.css", include_in_schema=False)
 def stylesheet() -> FileResponse:
     return FileResponse(FRONTEND / "styles.css", media_type="text/css")
+
+
+@app.get("/graph.js", include_in_schema=False)
+def graph_javascript() -> FileResponse:
+    return FileResponse(FRONTEND / "graph.js", media_type="application/javascript")
+
+
+@app.get("/hypotheses.js", include_in_schema=False)
+def hypotheses_javascript() -> FileResponse:
+    return FileResponse(FRONTEND / "hypotheses.js", media_type="application/javascript")

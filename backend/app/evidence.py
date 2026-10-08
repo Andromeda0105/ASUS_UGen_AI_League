@@ -39,6 +39,12 @@ class EvidenceStore:
         self.alerts = tuple(alerts)
         self.incidents = tuple(incidents)
         self.ids = {item.id for items in (events, alerts, incidents) for item in items}
+        from app.graph import build_evidence_graph
+        self.graph = build_evidence_graph(self)
+        from app.hypotheses import build_hypothesis_report
+        from threading import Lock
+        self.hypothesis_reports = {i.id: build_hypothesis_report(self, i) for i in incidents}
+        self.investigation_lock = Lock()
 
     def execute(self, name: str, arguments: dict) -> dict:
         if name not in TOOL_REQUIREMENTS:

@@ -21,6 +21,8 @@
         <nav class="nav">
           <a class="nav-item active" href="#overview"><span class="nav-icon">◫</span>總覽</a>
           <a class="nav-item" href="#incidents"><span class="nav-icon">⌁</span>安全事件 <span class="nav-count" id="nav-open-count">4</span></a>
+          <a class="nav-item" href="#hypotheses-panel"><span class="nav-icon">◇</span>調查假說</a>
+          <a class="nav-item" href="#evidence-graph-panel"><span class="nav-icon">⋈</span>證據圖</a>
           <a class="nav-item" href="#logs"><span class="nav-icon">≡</span>日誌來源</a>
         </nav>
         <div class="nav-label source-label">已連結來源 <span class="live-dot"></span></div>
@@ -33,7 +35,7 @@
       <main class="main" id="overview">
         <header class="topbar"><div class="breadcrumb">工作區 <span>/</span> <b>安全總覽</b></div><div class="top-actions"><span class="demo-badge"><i></i>示範資料</span><span class="top-divider"></span><button class="icon-button" title="通知" aria-label="通知">♧<i class="notification-dot"></i></button><span class="user-avatar">A</span></div></header>
         <div class="content">
-          <section class="page-heading"><div><div class="eyebrow"><span class="pulse"></span>離線樣本分析</div><h1>早安，管理員<span class="wave">✳</span></h1><p>選擇 SSH、Nginx 或跨來源樣本，查看關聯事件與本機 AI 調查。</p></div><div class="demo-controls"><label for="sample-select">日誌樣本</label><select id="sample-select" aria-label="選擇日誌樣本"><option value="compromised_login.log">暴力破解與可疑登入</option></select><button class="scan-button" id="scan-button">⌕ <span>偵測並分析</span></button></div></section>
+          <section class="page-heading"><div><div class="eyebrow"><span class="pulse"></span>離線樣本分析</div><h1>早安，管理員<span class="wave">✳</span></h1><p>選擇 SSH、Nginx 或跨來源樣本，查看關聯事件與本機 AI 調查。</p></div><div class="demo-controls"><label for="sample-select">日誌樣本</label><select id="sample-select" aria-label="選擇日誌樣本"><option value="compromised_login.log">暴力破解與可疑登入</option></select><label><input type="checkbox" id="scan-with-ai" checked>使用 AI</label><button class="scan-button" id="scan-button">⌕ <span>偵測並分析</span></button></div></section>
 
           <section class="stats-grid" aria-label="安全指標">
             <article class="stat-card"><div class="stat-top"><span>未處理事件</span><span class="stat-icon orange">⌁</span></div><div class="stat-value" id="stat-open">04</div><div class="stat-foot"><span class="trend up">↑ 2</span> 相較前 24 小時</div><div class="sparkline orange-line"><svg viewBox="0 0 120 32" preserveAspectRatio="none"><path d="M0 24 10 23 20 25 30 17 40 20 50 12 60 16 70 8 80 12 90 8 100 12 110 4 120 7"/></svg></div></article>
@@ -49,6 +51,8 @@
 
           <section class="panel incidents-panel" id="incidents"><div class="panel-heading incident-heading"><div><div class="title-inline"><h2>規則告警</h2><span class="open-pill" id="open-pill">4 未處理</span></div><p>依時間排序 · 點選告警查看詳情</p></div><div class="table-actions"><label class="search"><span>⌕</span><input id="search-input" type="search" placeholder="搜尋事件或 IP…" aria-label="搜尋事件或 IP" /></label><button class="filter-button" id="filter-button">☷ <span>篩選</span><i id="filter-indicator"></i></button></div></div><div class="filter-row" id="filter-row" hidden><button class="filter-chip selected" data-filter="all">全部事件</button><button class="filter-chip" data-filter="Critical">嚴重</button><button class="filter-chip" data-filter="High">高</button><button class="filter-chip" data-filter="Medium">中</button><button class="filter-chip" data-filter="Open">未處理</button></div><div class="table-scroll"><table><thead><tr><th>嚴重程度</th><th>事件</th><th>來源 IP</th><th>偵測時間</th><th>狀態</th><th></th></tr></thead><tbody id="incident-rows"></tbody></table><div id="empty-state" class="empty-state" hidden>找不到符合條件的事件</div></div><div class="table-footer"><span id="result-count">顯示 5 筆事件</span><button class="text-button" id="show-all">查看所有事件 <span>→</span></button></div></section>
           <section class="panel correlation-panel"><div class="panel-heading"><div><h2>Incident 關聯與時間線</h2><p>同一來源與時間範圍的調查群組；不代表已確認入侵。</p></div></div><div id="correlated-incidents" class="incident-timelines">掃描後顯示跨來源關聯。</div></section>
+          <section class="panel hypothesis-panel" id="hypotheses-panel"><div class="panel-heading"><div><h2>Hypothesis-driven Investigation</h2><p>比較多種解釋；支持分數不必合計為 1，也不是入侵機率。</p></div></div><div class="hypothesis-controls"><label>Incident <select id="hypothesis-incident"></select></label><label>本輪工具預算 <input id="tool-budget" type="number" min="0" max="12" value="4"></label><button id="read-investigate" class="investigation-action">唯讀調查（不使用 AI）</button><button id="ai-investigate" class="investigation-action">AI 比較假說</button></div><div id="observed-facts" class="observed-facts"></div><div id="hypothesis-cards" class="hypothesis-cards"></div><div id="missing-evidence" class="missing-evidence"></div><div id="investigation-questions" class="investigation-questions"></div><div id="investigation-stop" class="investigation-stop" aria-live="polite"></div></section>
+          <section class="panel graph-panel" id="evidence-graph-panel"><div class="panel-heading"><div><h2>Incident Evidence Graph</h2><p>實線：觀察／記錄關係；虛線：未驗證推論。點選節點或關係查看證據。</p></div><span id="graph-count"></span></div><div class="graph-controls"><label>範圍 <select id="graph-scope"></select></label><label><input type="checkbox" id="graph-inferred" checked>顯示推論</label><label><input type="checkbox" id="graph-events">顯示事件節點</label><label>縮放 <input id="graph-zoom" type="range" min="50" max="150" step="25" value="100"></label><button id="graph-clear">清除假說焦點</button></div><p class="graph-legend"><span>藍色＝觀察／記錄</span><span>橘色虛線＝推論</span><span>綠色＝支持假說</span><span>紅色＝反駁假說</span><span>灰色＝中性</span></p><p id="graph-overlay">未選擇假說</p><div id="evidence-graph" class="graph-canvas">掃描後建立證據關係圖。</div><div id="graph-inspector" class="graph-inspector">點選節點或關係查看說明。</div></section>
           <section class="panel copilot-panel" id="copilot-panel"><div class="panel-heading"><div><h2>Local AI Copilot</h2><p id="copilot-status">選擇日誌樣本後執行偵測與本機分析。</p></div><span class="local-pill"><i></i><span id="model-label">Qwen3 4B · 本機</span></span></div><div class="analysis-content" id="ai-analysis" aria-live="polite">分析結果會顯示在這裡。原始日誌不會傳送到 AI 模型。</div></section>
           <footer class="footer-note"><span>最後更新於 <b>剛剛</b></span><span>資料保留於本機 <i>·</i> <a href="#logs">管理日誌來源</a></span></footer>
         </div>
@@ -57,6 +61,8 @@
       <aside class="detail-panel" id="detail-panel" aria-label="事件詳細資料"><div class="detail-empty"><span class="detail-empty-icon">⌁</span><b>選取一個安全事件</b><p>查看事件摘要、原始日誌及建議處置。</p></div></aside>
     </div>
     <dialog id="evidence-dialog"><button id="close-evidence" aria-label="關閉證據">關閉</button><h2>本機證據</h2><pre id="evidence-content"></pre></dialog>
+    <script src="graph.js"></script>
+    <script src="hypotheses.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

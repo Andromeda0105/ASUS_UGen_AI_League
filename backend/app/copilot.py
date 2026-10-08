@@ -23,7 +23,7 @@ def chat(messages: list[dict], **settings) -> dict:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    timeout = float(os.getenv("OLLAMA_TIMEOUT", "180"))
+    timeout = float(os.getenv("OLLAMA_TIMEOUT", "300"))
     try:
         with urlopen(request, timeout=timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
@@ -58,6 +58,8 @@ def validate_analysis(content: str, store: EvidenceStore) -> AIAnalysis:
         for claim in analysis.assessment + analysis.recommendations:
             if not set(claim.evidence_ids) <= store.ids:
                 raise ValueError("模型引用了不存在的證據")
+        if any(not set(item.evidence_ids) <= store.ids for item in analysis.hypothesis_evaluations):
+            raise ValueError("假說比較引用不存在的證據")
         if store.alerts and not analysis.assessment:
             raise ValueError("告警分析缺少判讀依據")
         return analysis

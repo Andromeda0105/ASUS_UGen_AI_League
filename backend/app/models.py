@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, ConfigDict, model_validator
 from hashlib import sha256
 from zoneinfo import ZoneInfo
 import os
+from app.intelligence_models import HypothesisReport, HypothesisEvaluation
 
 
 class Severity(StrEnum):
@@ -93,12 +94,14 @@ class AIAnalysis(BaseModel):
     recommendations: list[EvidenceClaim] = Field(max_length=6)
     missing_evidence: list[str] = Field(max_length=6)
     confidence: float = Field(ge=0, le=1)
+    hypothesis_evaluations: list[HypothesisEvaluation] = Field(default_factory=list, max_length=3)
 
 
 class ScanRequest(BaseModel):
     sample: str = Field(default="scenario:multi_stage", min_length=1, max_length=80)
     samples: list[str] | None = Field(default=None, min_length=1, max_length=16)
     with_ai: bool = True
+    tool_budget: int = Field(default=4, ge=0, le=12)
 
 
 class ScanResult(BaseModel):
@@ -112,3 +115,15 @@ class ScanResult(BaseModel):
     ai_analysis: AIAnalysis | None = None
     ai_error: str | None = None
     ai_warnings: list[str] = Field(default_factory=list)
+    hypotheses: list[HypothesisReport] = Field(default_factory=list)
+    focused_incident_id: str | None = None
+
+
+class IncidentInvestigationResult(BaseModel):
+    incident_id: str
+    report: HypothesisReport
+    ai_status: str = "skipped"
+    ai_analysis: AIAnalysis | None = None
+    ai_error: str | None = None
+    ai_warnings: list[str] = Field(default_factory=list)
+    investigation: list[dict] = Field(default_factory=list)

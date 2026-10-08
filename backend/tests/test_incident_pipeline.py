@@ -212,10 +212,10 @@ class InvestigationTests(unittest.TestCase):
 
     def test_failed_ai_report_preserves_completed_tool_trace(self):
         tool = {"tool_calls": [{"function": {"name": "get_user_logins", "arguments": {"username": "admin"}}}]}
-        with patch("app.copilot.chat", side_effect=[tool, {"content": "not JSON"}]):
+        with patch("app.investigator.chat", side_effect=[{"content": "{\"question_ids\": []}"}, {"content": "not JSON"}]):
             result = scan_sample(ScanRequest(sample="scenario:multi_stage"))
         self.assertEqual(result.ai_status, "unavailable")
-        self.assertEqual(result.investigation[0]["result"]["total"], 1)
+        self.assertEqual(next(t for t in result.investigation if t["tool"] == "get_user_logins")["result"]["total"], 1)
         self.assertEqual(len(result.alerts), 3)
 
     def test_ai_offline_keeps_alerts_and_incidents(self):

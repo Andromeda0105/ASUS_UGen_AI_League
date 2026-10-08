@@ -9,6 +9,8 @@ SSH / Nginx logs → Parsers → LogEvent → Detectors → SecurityAlert
                                                        ↓
                                                     Incident
                                                        ↓
+                                      Evidence Graph + Hypothesis Engine
+                                                       ↓
                                          Local AI + Read-only tools
                                                        ↓
                                       AIAnalysis + Evidence references
@@ -39,21 +41,25 @@ uvicorn app.main:app --app-dir backend --reload
 | 變數 | 預設 | 用途 |
 | --- | --- | --- |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | 後端可連到的 Ollama 地址 |
-| `OLLAMA_MODEL` | `qwen3:4b` | 本機已安裝的模型，需支援 tools 與 structured output |
-| `OLLAMA_TIMEOUT` | `180` | 每次模型請求逾時秒數；有告警時可能發出兩次請求 |
+| `OLLAMA_MODEL` | `qwen3:4b` | 本機已安裝的模型，需支援 structured output |
+| `OLLAMA_TIMEOUT` | `300` | 每次模型請求逾時秒數；首次調查最多兩次模型請求 |
 | `LOG_TIMEZONE` | `Asia/Taipei` | 無時區的 SSH syslog 所屬主機時區 |
 
 SSH 樣本目前以 2026 年解析；Nginx 使用日誌內的年份與 offset。跨來源日誌必須來自同一主機／同一分析範圍，且時間設定一致。
 
 ## 查看新功能
 
-1. 在樣本選單選擇 **跨來源 · Web 探測 → SSH 可疑登入**。
-2. 按 **偵測並分析**，等待本機模型完成調查。
-3. 檢查 **規則告警**：10 筆事件會產生 3 個告警。
-4. 檢查 **Incident 關聯與時間線**：會形成 1 個 Critical Incident。
-5. 查看 AI 的摘要、判讀依據、唯讀調查建議及尚缺證據。
-6. 點擊 `INC-…`、`SSH-…`、`NGX-…` 或 `EVT-…` 引用，查看本次掃描的結構化證據與原始日誌。
-7. 展開 **唯讀工具查詢紀錄**，查看模型實際要求的查詢與結果。
+1. 選擇 **跨來源 · Web 探測 → SSH 可疑登入**。建議先取消勾選 **使用 AI**，按 **偵測並分析**，立即查看結果。
+2. 原有偵測結果仍為 **10 筆事件、3 個告警、1 個 Critical Incident**。
+3. 在 **Hypothesis-driven Investigation** 比較 H1 單一攻擊者、H2 共享來源／NAT、H3 攻擊後合法登入。觀察事實由後端建立，推論另列；展開支持／反駁／中性證據並點擊引用。
+4. 在 **Incident Evidence Graph** 查看實線（觀察／記錄關係）與虛線（推論）。點選 H1／H2／H3 標題可高亮相關節點與關係；點選事件、告警或 Incident 節點可開啟既有證據視窗。
+5. 勾選 **顯示事件節點** 查看完整 20 個節點；使用 **顯示推論**、縮放與範圍選單調整圖形。概覽預設隱藏事件節點，以保持可讀性。
+6. 按 **唯讀調查（不使用 AI）**。示範有三個可回答問題，預設預算 4 會查完後停止，說明剩餘問題需要 auditd、身份歸屬與歷史基線。
+7. 按 **AI 比較假說**，讓 Qwen 解釋 競爭假說 與剩餘不確定性。若還有未回答問題，AI 先選擇問題；查證過的問題不會重複查詢。
+8. 可將 **本輪工具預算** 改成 `1`，展示調查如何在預算耗盡時停止；每個可回答問題也可單獨按 **唯讀查詢**。
+9. 多個 Incident 時，先在假說區的下拉選單切換，再調查該 Incident。掃描時使用 AI 預設聚焦嚴重程度最高、時間最新的一個 Incident。
+
+不需要 Ollama 即可使用圖形、規則假說、證據導航與唯讀查詢。完整 AI 調查的本機 CPU 實測約需 6 分鐘，耗時依硬體而異；已先完成唯讀查詢時會跳過問題選擇回合，通常較快。
 
 示範時間線：
 
@@ -65,7 +71,7 @@ SSH 樣本目前以 2026 年解析；Nginx 使用日誌內的年份與 offset。
 
 Critical 是調查優先程度，**不代表已確認入侵**。成功登入可能合法；樣本沒有登入後程序、權限提升、資料存取或外洩證據。
 
-Ollama 不可用或輸出未通過驗證時，規則告警、Incident 與時間線仍可查看。前端狀態標記只保存在當頁，不會持久保存。
+Ollama 不可用或輸出未通過驗證時，規則告警、Incident、關係圖、規則假說與已完成的唯讀查詢仍可查看。前端狀態標記只保存在當頁，不會持久保存。
 
 ## 偵測與關聯規則
 
@@ -80,7 +86,7 @@ IP 可能共用於 NAT／代理，因此 Incident 表示調查關聯假說。SQL
 
 ## AI 與唯讀工具
 
-AI 主要輸入為 Incident、時間線與規則證據。原始 `raw_log` 不送入模型；模型可取得正規化帳號、IP、URI 等資料，這些字串都視為不可信資料。
+AI 主要輸入為聚焦 Incident 的觀察事實、確定性圖形概覽、競爭假說與調查問題。原始 `raw_log` 不送入模型；模型可取得正規化帳號、IP、URI 等資料，這些字串都視為不可信資料。
 
 工具僅查詢**本次掃描快照**：
 
@@ -91,7 +97,11 @@ AI 主要輸入為 Incident、時間線與規則證據。原始 `raw_log` 不送
 | `get_related_alerts` | 查詢指定來源 IP 的告警 |
 | `get_incident_timeline` | 查詢指定 Incident 的時間線 |
 
-工具採白名單，不接受任意檔案路徑、命令或變更操作。模型至多一輪工具選擇、四個工具呼叫；查詢預設回傳 40 筆、最多 100 筆，並回報 `total`／`truncated`。模型若未提出工具查詢，後端會補查首個 Incident 的時間線與來源事件；紀錄以 `origin: fallback` 標示，模型提出的查詢則為 `origin: model`。
+工具採白名單，不接受任意檔案路徑、命令或變更操作。後端從已驗證的假說模板建立調查問題與固定工具參數；AI 只能選擇既有 `question_ids`，不能任意新增工具或參數。
+
+每個請求最多 **一輪工具查詢**；工具預算預設 4、可設定 0–12，錯誤查詢也計入預算。查詢最多回傳 100 筆，並標示 `total`／`truncated`。模型跳過問題或輸出無效計畫時，後端依可信問題順序補查；紀錄的 `origin: model` 表示模型選擇，`origin: rule` 表示後端安排。查到的額外記錄會加入觀察事實並列為中性證據；不會因此自動宣稱入侵或合法登入。
+
+調查會記錄停止原因：預算耗盡、單輪上限、可回答問題完成，或剩餘問題需要未提供的遙測。空結果只表示本次樣本沒有符合條件的記錄，不能證明真實主機沒有程序、sudo 或其他活動。
 
 最終分析使用 Ollama JSON schema 與 Pydantic 驗證：
 
@@ -101,11 +111,19 @@ AI 主要輸入為 Incident、時間線與規則證據。原始 `raw_log` 不送
   "assessment": [{"text": "...", "evidence_ids": ["SSH-..."]}],
   "recommendations": [{"text": "...", "evidence_ids": ["INC-..."]}],
   "missing_evidence": ["缺少登入後程序活動"],
-  "confidence": 0.6
+  "confidence": 0.6,
+  "hypothesis_evaluations": [{
+    "hypothesis_id": "HYP-...",
+    "status": "plausible",
+    "confidence": 0.55,
+    "inference": "此解釋可能符合部分證據，但操作者身份仍未知。",
+    "evidence_ids": ["SSH-..."],
+    "graph_edge_ids": ["EDGE-..."]
+  }]
 }
 ```
 
-每個判讀與建議都必須引用本次掃描實際存在的證據 ID。格式錯誤或不存在的引用會隱藏整份 AI 結果；後端也會保守過濾非唯讀建議，若全部被移除則顯示預設唯讀調查方向，並透過 `ai_warnings` 說明。這不是語意安全的完整證明；ID 驗證與詞彙過濾無法保證所有文字正確，仍需人工檢查。`confidence` 是模型對分析完整度的自評，沒有校準，不是入侵機率。
+每個判讀、建議與假說比較都必須引用真實證據，假說 ID 與圖形邊 ID 也會驗證。AI 不可建立／修改圖形或告警；沒有來源身份或擁有者證據時，不允許將假說升級為確定結果。格式錯誤或不存在的引用會隱藏整份 AI 結果；後端也會保守過濾非唯讀建議，若全部被移除則顯示預設唯讀調查方向，並透過 `ai_warnings` 說明。這不是語意安全的完整證明；ID 驗證與詞彙過濾無法保證所有文字正確，仍需人工檢查。報告的 `confidence` 是模型對分析完整度的自評；假說的 `confidence` 是證據支持程度，後端會依資料不足設定分數上限；圖形邊的分數則是規則對關係的支持程度。三者均未經統計校準、不是入侵機率，假說分數不需要合計為 1。
 
 JSON schema 和 tool calling 接法參考 [Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs) 與 [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling)。同時設定 `think=false` 並加入 [Qwen3 官方 `/no_think` 開關](https://qwenlm.github.io/blog/qwen3/)，降低思考內容外漏及生成耗時。
 
@@ -120,7 +138,10 @@ JSON schema 和 tool calling 接法參考 [Ollama structured outputs](https://do
 - `GET /api/health`、`GET /api/ollama/status`：服務與模型狀態。
 - `GET /api/samples`：可用樣本名稱。
 - `GET /api/events`、`GET /api/alerts`：預設 SSH 樣本資料。
-- `POST /api/scan`：偵測、關聯並選擇性分析，回傳 `scan_id`、`alerts`、`incidents`、`ai_analysis`、`investigation`、`ai_warnings`。
+- `POST /api/scan`：偵測、關聯並選擇性分析，回傳 `scan_id`、`alerts`、`incidents`、`ai_analysis`、`investigation`、`ai_warnings`、`hypotheses`、`focused_incident_id`。
+- `GET /api/scans/{scan_id}/graph`：本次掃描的確定性節點與關係圖。
+- `GET /api/scans/{scan_id}/hypotheses`：各 Incident 的假說、觀察事實、調查問題及停止原因。
+- `POST /api/scans/{scan_id}/incidents/{incident_id}/investigate`：調查指定 Incident，例如 `{"with_ai":false,"tool_budget":4}`；可傳 `question_ids` 執行指定的可回答問題。
 - `GET /api/scans/{scan_id}/evidence/{evidence_id}`：本機證據，包含原始日誌。
 - `GET /api/scans/{scan_id}/tools/{tool_name}`：唯讀調查，參數以 query string 傳入。
 
@@ -143,7 +164,11 @@ curl -X POST http://127.0.0.1:8000/api/scan \
 不同時間或不同 IP 的樣本不會強行產生多階段 Incident。取得 `scan_id` 後，可將其代入：
 
 ```sh
-curl 'http://127.0.0.1:8000/api/scans/SCAN_ID/tools/get_user_logins?username=admin'
+curl 'http://127.0.0.1:8000/api/scans/SCAN_ID/graph'
+curl 'http://127.0.0.1:8000/api/scans/SCAN_ID/hypotheses'
+curl -X POST 'http://127.0.0.1:8000/api/scans/SCAN_ID/incidents/INCIDENT_ID/investigate' \
+  -H 'Content-Type: application/json' \
+  -d '{"with_ai":false,"tool_budget":4}'
 ```
 
 快照只在單一後端程序記憶體中保留最近 32 次掃描；重啟／reload 或淘汰後須重新掃描。本階段請使用單一 Uvicorn worker。
@@ -155,6 +180,26 @@ curl 'http://127.0.0.1:8000/api/scans/SCAN_ID/tools/get_user_logins?username=adm
 ```sh
 PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v
 node --check app.js
+node --check graph.js
+node --check hypotheses.js
+# 可選：已安裝 Firefox 的主機環境，使用獨立臨時 profile 做實際 DOM 與 API 驗證
+PYTHONPATH=backend .venv/bin/python scripts/browser_smoke.py
 ```
 
-目前沒有即時收集、firewall／auditd／process 日誌、主機行為基線或安全關聯圖。事件專屬欄位仍保留相容的現有模型，尚未全面遷移至 attributes。活動／威脅分布圖仍為標示過的展示圖表。
+目前沒有即時收集、firewall／auditd／process 日誌或主機行為基線。事件專屬欄位仍保留相容的現有模型，尚未全面遷移至 attributes。活動／威脅分布圖仍為標示過的展示圖表。
+
+
+## 新功能實作位置
+
+| 檔案 | 功能 |
+| --- | --- |
+| `backend/app/intelligence_models.py` | 圖形、假說、問題、AI 比較與調查結果契約 |
+| `backend/app/graph.py` | 從 EvidenceStore 建立有證據引用的確定性圖形 |
+| `backend/app/hypotheses.py` | 競爭假說模板、證據分類、觀察事實與問題 |
+| `backend/app/investigator.py` | 有界問題選擇、唯讀查詢、停止條件與 AI 比較驗證 |
+| `graph.js` | SVG 關係圖、節點／邊證據導航、篩選與假說高亮 |
+| `hypotheses.js` | 競爭假說卡片、觀察事實、缺少證據與問題互動 |
+
+圖形與假說不依賴 LLM、不需要圖形資料庫。所有資料限定在當次掃描，沒有跨主機身份歸屬功能。實線包含日誌觀察與後端建立的記錄／群組關係；`CONTAINS` 表示群組成員，`FOLLOWED_BY` 只表示時間先後，均不是因果證明。
+
+H2 目前沒有直接 NAT 證據，因此保持「證據不足」或低支持程度的合理假說。H1／H3 不能由 SSH/Nginx 判定成功登入者是否為攻擊者／擁有者。新增 auditd 等資料前，後端對 H1、H2、H3 的 AI 支持分數上限分別為 0.65、0.35、0.55；這是保守顯示規則，沒有統計校準。
