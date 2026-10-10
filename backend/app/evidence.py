@@ -25,7 +25,7 @@ TOOL_FIELDS = {
     "get_incident_timeline": {"incident_id", "limit"},
 }
 TOOLS = [{"type": "function", "function": {
-    "name": name, "description": "唯讀查詢本次掃描資料；回傳有 ID 的證據與截斷資訊。",
+    "name": name, "description": "Read-only query within this scan; returns evidence IDs and truncation information.",
     "parameters": {"type": "object", "additionalProperties": False,
                    "properties": {key: {k: v for k, v in value.items() if k not in {"title", "default"}}
                                   for key, value in Query.model_json_schema()["properties"].items()
@@ -48,23 +48,23 @@ class EvidenceStore:
 
     def execute(self, name: str, arguments: dict) -> dict:
         if name not in TOOL_REQUIREMENTS:
-            raise ValueError("不允許的調查工具")
+            raise ValueError("Investigation tool not allowed")
         if not isinstance(arguments, dict):
-            raise ValueError("參數必須是物件")
+            raise ValueError("Arguments must be an object")
         if any(key not in TOOL_FIELDS[name] and value is not None for key, value in arguments.items()):
-            raise ValueError("工具不支援此查詢參數")
+            raise ValueError("Tool does not support this query parameter")
         query = Query.model_validate(arguments)
         if any(getattr(query, field) is None for field in TOOL_REQUIREMENTS[name]):
-            raise ValueError("缺少必要查詢參數")
+            raise ValueError("Required query parameter missing")
         for bound in (query.start, query.end):
             if bound and bound.tzinfo is None:
-                raise ValueError("時間範圍必須包含時區")
+                raise ValueError("Time bounds must include a timezone")
         if query.start and query.end and query.start > query.end:
-            raise ValueError("開始時間不可晚於結束時間")
+            raise ValueError("Start time must not be after end time")
         if name == "get_incident_timeline":
             incident = next((i for i in self.incidents if i.id == query.incident_id), None)
             if incident is None:
-                raise ValueError("找不到本次掃描的 Incident")
+                raise ValueError("Incident not found in this scan")
             items = [t.model_dump(mode="json") for t in incident.timeline]
         else:
             source = self.alerts if name == "get_related_alerts" else self.events

@@ -86,9 +86,9 @@ class MVPTests(unittest.TestCase):
         self.assertEqual(markdown.status_code, 200, markdown.text)
         self.assertIn('attachment;', markdown.headers['content-disposition'])
         self.assertIn(incident_id, html.unescape(markdown.text))
-        self.assertIn('沒有可用的 AI 評估', markdown.text)
-        self.assertIn('推論，未驗證', markdown.text)
-        self.assertIn('不能證明入侵', markdown.text)
+        self.assertIn('No AI assessment available', markdown.text)
+        self.assertIn('Inferred, unverified', markdown.text)
+        self.assertIn('does not prove compromise', markdown.text)
         history = self.client.get('/api/scans').json()
         self.assertEqual(history['total'], 1)
         self.assertEqual(history['items'][0]['scan_id'], scan_id)
@@ -233,10 +233,10 @@ class MVPTests(unittest.TestCase):
         from app.models import AIAnalysis, IncidentInvestigationResult
         scan=self.imported();incident_id=scan['incidents'][0]['id'];prefix=f"/api/scans/{scan['scan_id']}"
         store=scan_store(scan['scan_id'])
-        analysis=AIAnalysis(summary='模型推論：尚不能確認操作者身份。',
-            assessment=[{'text':'日誌有短時間多次失敗。','evidence_ids':[incident_id]}],
-            recommendations=[{'text':'比對帳號擁有者登入紀錄。','evidence_ids':[incident_id]}],
-            missing_evidence=['缺少身份證據。'],confidence=0.4)
+        analysis=AIAnalysis(summary='AI inference: operator identity remains unknown.',
+            assessment=[{'text':'Logs record repeated failures in a short period.','evidence_ids':[incident_id]}],
+            recommendations=[{'text':'Compare account owner login records.','evidence_ids':[incident_id]}],
+            missing_evidence=['Attribution evidence is missing.'],confidence=0.4)
         result=IncidentInvestigationResult(incident_id=incident_id,report=store.hypothesis_reports[incident_id],
                                          ai_status='completed',ai_analysis=analysis)
         with patch('app.main.run_hypothesis_investigation',return_value=result):
@@ -247,8 +247,8 @@ class MVPTests(unittest.TestCase):
         self.client.post(prefix+f'/incidents/{incident_id}/investigate',json={'with_ai':False,'tool_budget':1})
         SCANS.clear()
         markdown=self.client.get(prefix+f'/incidents/{incident_id}/report.md').text
-        self.assertIn('模型推論：尚不能確認操作者身份。',markdown)
-        self.assertIn('AI 評估（模型生成的推論）',markdown)
+        self.assertIn('AI inference: operator identity remains unknown.',markdown)
+        self.assertIn('AI assessment (model-generated inference)',markdown)
 
     def test_deleted_snapshot_cannot_be_resurrected(self):
         scan=self.imported()
@@ -276,7 +276,7 @@ class MVPTests(unittest.TestCase):
         self.assertEqual(scan['event_count'],4)
         self.assertEqual({a['alert_type'] for a in scan['alerts']},{'sqli_attempt','xss_attempt'})
         self.assertEqual(len(scan['alerts']),2)
-        self.assertTrue(all('嘗試' in a['summary'] for a in scan['alerts']))
+        self.assertTrue(all('attempt' in a['summary'] for a in scan['alerts']))
 
 
 if __name__=='__main__':unittest.main()

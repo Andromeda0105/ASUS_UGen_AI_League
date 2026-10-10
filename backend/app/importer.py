@@ -28,22 +28,22 @@ def parse_import(data, filename, source_type, *, ssh_year=None):
                   ssh_year=ssh_year if source_type == 'ssh' else None,
                   timezone=os.getenv('LOG_TIMEZONE', 'Asia/Taipei') if source_type == 'ssh' else 'log_offset')
     if not data:
-        report['issues'] = [{'line': None, 'reason': '檔案為空或只有空白。'}]
+        report['issues'] = [{'line': None, 'reason': 'File is empty or contains only whitespace.'}]
         return [], report
     try:
         text = data.decode('utf-8-sig')
     except UnicodeDecodeError:
         report['line_count'] = len(data.splitlines())
         report['rejected_lines'] = report['line_count']
-        report['issues'] = [{'line': None, 'reason': '檔案必須使用 UTF-8 編碼。'}]
+        report['issues'] = [{'line': None, 'reason': 'File must use UTF-8 encoding.'}]
         return [], report
     lines = text.splitlines()
     report['line_count'] = len(lines)
     if len(lines) > limits()['max_lines_per_file']:
-        raise ValueError('檔案超過行數上限。')
+        raise ValueError('File exceeds the line count limit.')
     if not text.strip():
         report['rejected_lines'] = len(lines)
-        report['issues'] = [{'line': None, 'reason': '檔案只有空白，沒有可解析事件。'}]
+        report['issues'] = [{'line': None, 'reason': 'File contains only whitespace and no parseable events.'}]
         return [], report
     events = []
     seen = set()
@@ -51,17 +51,17 @@ def parse_import(data, filename, source_type, *, ssh_year=None):
         reason = None
         event = None
         if len(line.encode('utf-8')) > limits()['max_line_bytes']:
-            reason = '單行超過長度上限。'
+            reason = 'Line exceeds the length limit.'
         elif not line.strip():
-            reason = '空白行。'
+            reason = 'Blank line.'
         else:
             try:
                 event = parse_ssh_line(line, year=ssh_year) if source_type == 'ssh' else parse_nginx_line(line)
             except (ValueError, OverflowError):
-                reason = '日期、時區或欄位無效。'
+                reason = 'Invalid date, timezone, or field.'
             if event is None and reason is None:
-                reason = ('SSH 非支援的認證事件或格式／日期無效；目前只解析 Failed password 與 Accepted 登入。'
-                          if source_type == 'ssh' else '不符合 Nginx combined access log 格式或日期無效。')
+                reason = ('Unsupported SSH event or invalid format/date. Only Failed password and Accepted authentication are parsed.'
+                          if source_type == 'ssh' else 'Invalid Nginx combined access log format or date.')
         if event is None:
             report['rejected_lines'] += 1
             if len(report['issues']) < 100:

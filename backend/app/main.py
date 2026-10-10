@@ -30,25 +30,26 @@ from app.parsers.ssh import parse_ssh_logs
 from app.importer import parse_import, limits
 from app.storage import repository
 from app.reports import incident_report
+from app.language import english_scan, english_report, english_investigation
 
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT
 SAMPLE_YEAR = 2026
 SAMPLES = {
-    "scenario": {"multi_stage": "跨來源 · Web 探測 → SSH 可疑登入"},
+    "scenario": {"multi_stage": "Cross-source · Web reconnaissance → SSH suspicious authentication"},
     "ssh": {
-        "compromised_login.log": "SSH · 暴力破解與可疑登入",
-        "normal.log": "SSH · 一般登入",
-        "bruteforce.log": "SSH · 暴力破解",
-        "suspicious_login.log": "SSH · 多次失敗後登入成功",
+        "compromised_login.log": "SSH · Brute force and suspicious authentication",
+        "normal.log": "SSH · Normal authentication",
+        "bruteforce.log": "SSH · Brute force",
+        "suspicious_login.log": "SSH · Successful authentication after repeated failures",
     },
     "nginx": {
-        "normal.log": "Nginx · 一般流量",
+        "normal.log": "Nginx · Normal traffic",
         "sqli.log": "Nginx · SQL Injection",
         "xss.log": "Nginx · XSS",
-        "enumeration.log": "Nginx · 路徑列舉",
-        "mix.log": "Nginx · 混合攻擊情境",
+        "enumeration.log": "Nginx · Path enumeration",
+        "mix.log": "Nginx · Mixed attack scenario",
     },
 }
 
@@ -62,13 +63,21 @@ app = FastAPI(
 )
 
 
+@app.middleware('http')
+async def english_response_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers['Content-Language'] = 'en'
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 def load_sample_events(sample: str = "ssh:compromised_login.log") -> list[LogEvent]:
     try:
         source, filename = sample.split(":", maxsplit=1)
     except ValueError as error:
-        raise HTTPException(status_code=404, detail="樣本名稱格式應為 source:filename") from error
+        raise HTTPException(status_code=404, detail="Sample names must use source:filename") from error
     if source not in SAMPLES or filename not in SAMPLES[source]:
-        raise HTTPException(status_code=404, detail="找不到指定的樣本")
+        raise HTTPException(status_code=404, detail="Sample not found")
     if source == "scenario":
         directory = ROOT / "samples" / "scenarios"
         return sorted(parse_nginx_logs((directory / "multi_stage_access.log").read_text())
@@ -121,7 +130,7 @@ def analyze_security_scan(sample_name, store, trace, warnings, tool_budget=4):
     trace.extend(result.investigation)
     warnings.extend(result.ai_warnings)
     if result.ai_status != "completed":
-        raise OllamaError(result.ai_error or "AI 比較未完成，唯讀證據與假說仍可查看。")
+        raise OllamaError(result.ai_error or "AI comparison incomplete; read-only evidence and hypotheses remain available.")
     return result.ai_analysis, trace
 
 
@@ -145,7 +154,7 @@ def create_scan(input_events, label, with_ai=False, tool_budget=4, file_results=
     incidents = correlate_incidents(alerts)
     store = EvidenceStore(events, alerts, incidents)
     result = ScanResult(
-        sample=label, event_count=len(events), alerts=alerts, ai_status="skipped",
+        sample=label, event_count=len(events), alerts=alerts, ai_status="skipped", content_language="en", presentation_version=2,
         scan_id=uuid4().hex, incidents=incidents,
         focused_incident_id=priority_incident(store).id if store.incidents else None,
         created_at=datetime.now(timezone.utc),
@@ -166,16 +175,16 @@ def create_scan(input_events, label, with_ai=False, tool_budget=4, file_results=
     with SCAN_LOCK:
         persist(store)
         cache_store(result.scan_id, store)
-    return result
+    return english_scan(result, store)
 
 
 def persist(store):
     try:
         repository.save(store)
     except LookupError as error:
-        raise HTTPException(404, "掃描已被刪除。") from error
+        raise HTTPException(404, "The scan was deleted.") from error
     except (sqlite3.Error, OSError) as error:
-        raise HTTPException(503, "本機資料庫寫入失敗；本次結果未完成儲存，請確認資料目錄可寫及磁碟空間。") from error
+        raise HTTPException(503, "Local database write failed. Results were not saved. Check directory permissions and disk space.") from error
 
 
 def cache_store(scan_id, store):
@@ -206,7 +215,7 @@ class UploadLimitMiddleware:
         except ValueError:
             declared = 0
         if declared > ceiling:
-            return await JSONResponse({'detail': '上傳內容超過總大小上限。'}, 413)(scope, receive, send)
+            return await JSONResponse({'detail': 'Upload exceeds the total size limit.'}, 413)(scope, receive, send)
         consumed = 0
 
         async def bounded_receive():
@@ -219,7 +228,7 @@ class UploadLimitMiddleware:
         try:
             await self.app(scope, bounded_receive, send)
         except UploadTooLarge:
-            await JSONResponse({'detail': '上傳內容超過總大小上限。'}, 413)(scope, receive, send)
+            await JSONResponse({'detail': 'Upload exceeds the total size limit.'}, 413)(scope, receive, send)
 
 
 app.add_middleware(UploadLimitMiddleware)
@@ -246,9 +255,9 @@ async def upload_scan(request: Request):
         async with request.form(max_files=config['max_files'], max_fields=32, max_part_size=4096) as form:
             files, sources = form.getlist('files'), form.getlist('source_types')
             if not files or len(files) != len(sources) or any(not isinstance(f, UploadFile) for f in files):
-                raise HTTPException(422, '請提供 files 與逐檔對應的 source_types。')
+                raise HTTPException(422, 'Provide files and a corresponding source_types entry for each file.')
             if any(source not in ('ssh', 'nginx') for source in sources):
-                raise HTTPException(422, '不支援的日誌類型；僅接受 ssh 或 nginx。')
+                raise HTTPException(422, 'Unsupported log type. Use ssh or nginx.')
             try:
                 year = int(form.get('ssh_year', datetime.now().year))
                 budget = int(form.get('tool_budget', 4))
@@ -258,13 +267,13 @@ async def upload_scan(request: Request):
                 if ai_value not in ('true', 'false'):
                     raise ValueError()
             except (ValueError, TypeError):
-                raise HTTPException(422, 'ssh_year 必須介於 1970–9999、tool_budget 介於 0–12、with_ai 為 true/false。')
+                raise HTTPException(422, 'ssh_year must be 1970–9999, tool_budget 0–12, and with_ai true or false.')
             events, reports, total = [], [], 0
             for file, source in zip(files, sources):
                 data = await file.read(config['max_file_bytes'] + 1)
                 total += len(data)
                 if len(data) > config['max_file_bytes'] or total > config['max_total_bytes']:
-                    raise HTTPException(413, '檔案超過單檔或總大小上限。')
+                    raise HTTPException(413, 'A file or the combined upload exceeds the size limit.')
                 try:
                     parsed, report = await run_in_threadpool(parse_import, data, file.filename, source, ssh_year=year)
                 except ValueError as error:
@@ -272,11 +281,11 @@ async def upload_scan(request: Request):
                 events.extend(parsed)
                 reports.append(report)
             if not events:
-                raise HTTPException(422, {'message': '沒有可解析的事件；請檢查格式、編碼與日誌類型。', 'file_results': reports})
-            return await run_in_threadpool(create_scan, events, '本機匯入：' + ', '.join(r['filename'] for r in reports),
+                raise HTTPException(422, {'message': 'No parseable events. Check file format, encoding, and log type.', 'file_results': reports})
+            return await run_in_threadpool(create_scan, events, 'Local import: ' + ', '.join(r['filename'] for r in reports),
                                            ai_value == 'true', budget, reports)
     except UploadTooLarge:
-        raise HTTPException(413, '上傳內容超過總大小上限。')
+        raise HTTPException(413, 'Upload exceeds the total size limit.')
 
 
 @app.get('/api/scans')
@@ -284,14 +293,14 @@ def scan_history(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge
     try:
         return repository.history(limit, offset)
     except (sqlite3.Error, OSError) as error:
-        raise HTTPException(503, '無法讀取本機掃描歷史。') from error
+        raise HTTPException(503, 'Unable to read local scan history.') from error
 
 
 @app.get('/api/scans/{scan_id}', response_model=ScanResult)
 def get_scan(scan_id: str):
     store = scan_store(scan_id)
     with store.investigation_lock:
-        return store.result.model_copy(update={'hypotheses': list(store.hypothesis_reports.values())})
+        return english_scan(store.result.model_copy(update={'hypotheses': list(store.hypothesis_reports.values())}), store)
 
 
 @app.delete('/api/scans/{scan_id}')
@@ -300,12 +309,12 @@ def delete_scan(scan_id: str):
         try:
             deleted = repository.delete(scan_id)
         except (sqlite3.Error, OSError) as error:
-            raise HTTPException(503, '刪除失敗；請確認本機資料庫可寫。') from error
+            raise HTTPException(503, 'Deletion failed. Check local database write permissions.') from error
         store = SCANS.pop(scan_id, None)
         if store is not None:
             store.deleted = True
     if not deleted:
-        raise HTTPException(404, '找不到指定掃描。')
+        raise HTTPException(404, 'Scan not found.')
     return {'deleted': True, 'scan_id': scan_id}
 
 
@@ -316,24 +325,24 @@ def scan_store(scan_id: str) -> EvidenceStore:
             try:
                 store = repository.load(scan_id)
             except (sqlite3.Error, OSError, ValueError) as error:
-                raise HTTPException(503, "無法載入本機掃描快照。") from error
+                raise HTTPException(503, "Unable to load the local scan snapshot.") from error
             if store is not None:
                 cache_store(scan_id, store)
     if store is None:
-        raise HTTPException(404, "找不到掃描；可能已被刪除。")
+        raise HTTPException(404, "Scan not found. It may have been deleted.")
     return store
 
 
 @app.get("/api/scans/{scan_id}/hypotheses", response_model=list[HypothesisReport])
 def get_hypotheses(scan_id: str):
-    return list(scan_store(scan_id).hypothesis_reports.values())
+    return [english_report(r) for r in scan_store(scan_id).hypothesis_reports.values()]
 
 
 @app.post("/api/scans/{scan_id}/incidents/{incident_id}/investigate", response_model=IncidentInvestigationResult)
 def investigate_incident(scan_id: str, incident_id: str, request: InvestigationRequest):
     store = scan_store(scan_id)
     if incident_id not in store.hypothesis_reports:
-        raise HTTPException(404, "找不到本次掃描的 Incident")
+        raise HTTPException(404, "Incident not found in this scan")
     try:
         with store.investigation_lock:
             previous = deepcopy(store.hypothesis_reports)
@@ -349,13 +358,13 @@ def investigate_incident(scan_id: str, incident_id: str, request: InvestigationR
             try:
                 with SCAN_LOCK:
                     if getattr(store, 'deleted', False):
-                        raise HTTPException(404, '掃描已被刪除。')
+                        raise HTTPException(404, 'The scan was deleted.')
                     persist(store)
             except HTTPException:
                 store.hypothesis_reports = previous
                 store.result = previous_result
                 raise
-            return result
+            return english_investigation(result, store)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
 
@@ -372,7 +381,7 @@ def get_evidence(scan_id: str, evidence_id: str):
         for item in items:
             if item.id == evidence_id:
                 return item
-    raise HTTPException(404, "找不到本次掃描的證據")
+    raise HTTPException(404, "Evidence not found in this scan")
 
 
 @app.get("/api/scans/{scan_id}/tools/{tool_name}")
@@ -383,7 +392,7 @@ def investigate(scan_id: str, tool_name: str, source_ip: str | None = None,
         return scan_store(scan_id).execute(tool_name, dict(source_ip=source_ip, username=username,
                       start=start, end=end, incident_id=incident_id, limit=limit))
     except ValueError as error:
-        raise HTTPException(422, "調查參數無效或工具不允許") from error
+        raise HTTPException(422, "Invalid investigation parameters or tool not allowed") from error
 
 
 @app.get("/api/ollama/status")
@@ -397,10 +406,10 @@ def ollama_status() -> dict[str, str | bool]:
         return {
             "available": model_available,
             "model": model,
-            "message": "模型已就緒" if model_available else "Ollama 已啟動，但找不到指定模型",
+            "message": "Model ready" if model_available else "Ollama is running, but the selected model is not installed",
         }
     except (URLError, TimeoutError, json.JSONDecodeError):
-        return {"available": False, "model": model, "message": "無法連線本機 Ollama"}
+        return {"available": False, "model": model, "message": "Unable to reach local Ollama"}
 
 
 @app.get("/", include_in_schema=False)

@@ -17,7 +17,7 @@ class HypothesisTests(unittest.TestCase):
                          {"possible_single_attacker_campaign", "possible_shared_source_activity", "possible_legitimate_successful_login"})
         self.assertTrue(all(h.missing_evidence and 0 <= h.confidence <= 1 for h in self.report.hypotheses))
         self.assertNotEqual(sum(h.confidence for h in self.report.hypotheses), 1)
-        self.assertIn("不能區分", self.report.uncertainty)
+        self.assertIn("cannot distinguish", self.report.uncertainty)
 
     def test_evidence_and_edges_are_real_and_roles_disjoint(self):
         edges = {e.id for e in self.store.graph.edges}

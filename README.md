@@ -1,31 +1,35 @@
 # AI Security Log Copilot
 
-本機 SSH／Nginx 日誌調查工具。規則引擎負責偵測，Incident Correlator 建立關聯與時間線，Ollama / Qwen 負責唯讀查證及解釋。AI 不會修改偵測結果或執行系統操作。
+A local SSH and Nginx log investigation tool. Import your own logs, detect suspicious activity, investigate correlated incidents, inspect evidence, and export Markdown reports. Scans and investigation results are saved in local SQLite so you can reopen them after restarting the backend.
+
+The deterministic backend establishes events, alerts, and observed facts. Optional AI analysis uses Ollama and Qwen to compare explanations and suggest read-only investigation. AI does not change detection results or execute system commands.
 
 ```text
-SSH / Nginx logs → Parsers → LogEvent → Detectors → SecurityAlert
-                                                       ↓
-                                              Incident Correlator
-                                                       ↓
-                                                    Incident
-                                                       ↓
-                                      Evidence Graph + Hypothesis Engine
-                                                       ↓
-                                         Local AI + Read-only tools
-                                                       ↓
-                                      AIAnalysis + Evidence references
+SSH / Nginx logs
+       |
+       v
+Parsers -> LogEvent -> Detectors -> SecurityAlert
+                                         |
+                                         v
+                               Incident Correlator
+                                         |
+                                         v
+                        Evidence Graph + Hypotheses
+                                         |
+                                         v
+                         Read-only Investigation
+                           + Optional Local AI
+                                         |
+                                         v
+                      Evidence-backed Markdown Report
+                              + SQLite History
 ```
 
-## 啟動
+## Quick start
 
-需要 Python 3.11+。Ollama 與 `qwen3:4b` 僅供可選的 AI 分析；匯入、規則偵測、調查及匯出均可離線使用。
+### 1. Install and start the application
 
-```sh
-# Ollama 已啟動時不用重複執行
-ollama serve
-```
-
-另一個終端機，在 repo 根目錄：
+Python 3.11 or newer is required. Run these commands from the repository root:
 
 ```sh
 python3 -m venv .venv
@@ -34,171 +38,269 @@ python -m pip install -e ./backend
 uvicorn app.main:app --app-dir backend --reload
 ```
 
-已建立虛擬環境者，本次升級請先執行 `.venv/bin/pip install -e ./backend` 安裝 multipart 相依套件，再重新啟動 Uvicorn。開啟 <http://127.0.0.1:8000>；API 文件在 <http://127.0.0.1:8000/docs>。
+Open the dashboard at **http://127.0.0.1:8000**. Interactive API documentation is available at **http://127.0.0.1:8000/docs**.
 
-環境變數：
-
-| 變數 | 預設 | 用途 |
-| --- | --- | --- |
-| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | 後端可連到的 Ollama 地址 |
-| `OLLAMA_MODEL` | `qwen3:4b` | 本機已安裝的模型，需支援 structured output |
-| `OLLAMA_TIMEOUT` | `300` | 每次模型請求逾時秒數；首次調查最多兩次模型請求 |
-| `LOG_TIMEZONE` | `Asia/Taipei` | 無時區的 SSH syslog 所屬主機時區 |
-
-SSH 樣本目前以 2026 年解析；Nginx 使用日誌內的年份與 offset。跨來源日誌必須來自同一主機／同一分析範圍，且時間設定一致。
-
-## MVP：匯入 → 調查 → 匯出 → 重開
-
-1. 在「匯入本機日誌」選擇一或多個檔案，各檔分別選 `SSH authentication` 或 `Nginx combined access`。不使用自動格式辨識。
-2. SSH syslog 不含年份，請填入實際 **SSH 年份**；主機時區由 `LOG_TIMEZONE` 設定。示範 `samples/scenarios/multi_stage_auth.log` 的年份填 `2026`。Nginx 直接使用日誌內年份與時區 offset。
-3. 建議先取消「使用 AI」，按「匯入並偵測」。每檔會顯示接受／跳過行數、重複行數，以及最多 100 筆含行號的診斷；更多診斷會顯示省略數。空檔或編碼錯誤的檔案會標示未接受，其他有效檔案仍可成功匯入。全部無效時回傳錯誤，不新增歷史。
-4. 在 Incident 清單按「選擇此 Incident」，時間線、假說、圖形與 AI 評估會同步切換。點選證據 ID 可查看正規化欄位與原始日誌。
-5. 按「唯讀調查」，或選某個問題的「唯讀查詢」。畫面顯示本輪預算、查詢答案與停止原因；有 Ollama 時可按「AI 比較假說」。
-6. 按 Incident 旁或調查區的「下載 Markdown」，取得包含證據附錄、假說、未回答問題與不確定性的報告。沒有 AI 也能下載；模型判讀另行標示為推論。
-7. 「掃描歷史」可開啟先前結果，恢復已回答問題與 AI 分析，不會重新呼叫模型。重新啟動後端後，頁面預設重開最近一筆；空歷史第一次載入會建立跨來源示範掃描。
-8. 使用「刪除」移除指定掃描及其證據／調查紀錄，其他掃描不受影響。告警詳情的狀態標記仍僅供當頁使用，未儲存。
-
-快速示範：同時選擇 `samples/scenarios/multi_stage_access.log`（Nginx）與 `samples/scenarios/multi_stage_auth.log`（SSH，2026），預期 **10 筆事件、3 個告警、1 個 Incident**。
-
-匯入規則與限制：UTF-8 / UTF-8 BOM、SSH 的 `Failed password`／`Accepted password|publickey|keyboard-interactive/pam`、Nginx **combined** 格式。其他 SSH 訊息會標示跳過；不會展開 `message repeated N times` 為 N 個獨立事件。完全相同的正規化事件 ID 會去重；保留單檔接受數與整次去重數。多個主機／不同年份的 SSH 日誌請分次匯入；本輪 SSH 檔案共用同一年份與主機時區。
-
-| 設定 | 預設 | 用途 |
-| --- | --- | --- |
-| `COPILOT_DB_PATH` | `data/copilot.sqlite3` | 本機 SQLite 路徑 |
-| `UPLOAD_MAX_FILES` | `8` | 每次檔案數 |
-| `UPLOAD_MAX_FILE_BYTES` | `2097152` | 單檔 2 MiB |
-| `UPLOAD_MAX_TOTAL_BYTES` | `8388608` | 合計 8 MiB |
-| `UPLOAD_MAX_LINES` | `10000` | 每檔行數；超出則拒絕本次匯入 |
-| `UPLOAD_MAX_LINE_BYTES` | `16384` | 單行長度；超出則標示跳過 |
-
-環境變數需在啟動前設定。檔案超過大小／總量限制回傳 413；不支援類型或全部無法解析回傳 422。大量事件的完整圖形可能較慢，預設以 Incident 範圍並隱藏事件節點。
-
-### 本機保存與保留行為
-
-SQLite 的 `scans` 保存 metadata、alerts、incidents、假說和調查結果的 JSON；`events` 保存逐筆正規化事件與原始日誌，以 scan ID 外鍵串連並連動刪除。每次儲存使用交易，提交成功後才將掃描公開；資料庫寫入失敗回傳 503，不顯示已完成。重新載入時保留證據 ID，從證據重建圖形，恢復已回答問題與模型結果。
-
-沒有自動到期政策：掃描會保留至使用者刪除。`data/` 已排除 Git；原始上傳檔案不另存，解析成功行的原文會保存在 SQLite。未解析的行只保留診斷，不保存原文。SQLite 是本機明文檔案，新增檔案使用僅擁有者讀寫權限；不把原始日誌寫入 browser storage 或應用程式例行日誌。刪除是資料庫邏輯刪除，不能保證備份或磁碟殘留被抹除。下載報告也包含原始證據。
-
-此版本定位為單一使用者的本機服務，請維持預設 `127.0.0.1` 綁定；尚未提供多人權限／主機身份管理。圖形重建使用目前版本規則，之後升級規則可能改變衍生關係，原始證據 ID 不變。
-
-### 新增 API
-
-- `GET /api/import/config`：匯入限制、預設 SSH 年份與主機時區。
-- `POST /api/scans/upload`：multipart，多個 `files` 與順序一致的 `source_types`，另傳 `ssh_year`、`with_ai`、`tool_budget`。
-- `GET /api/scans?limit=20&offset=0`：分頁歷史 metadata；不傳回原始日誌。
-- `GET /api/scans/{scan_id}`：重開完整掃描結果與保存的各 Incident 調查結果。
-- `DELETE /api/scans/{scan_id}`：刪除指定掃描。
-- `GET /api/scans/{scan_id}/incidents/{incident_id}/report.md`：下載證據可追溯的 Markdown。
+If the virtual environment already exists, update dependencies and restart the backend:
 
 ```sh
-curl -X POST http://127.0.0.1:8000/api/scans/upload \
-  -F 'files=@samples/scenarios/multi_stage_access.log' -F 'source_types=nginx' \
-  -F 'files=@samples/scenarios/multi_stage_auth.log' -F 'source_types=ssh' \
-  -F 'ssh_year=2026' -F 'with_ai=false'
-
-curl http://127.0.0.1:8000/api/scans
-curl 'http://127.0.0.1:8000/api/scans/SCAN_ID/incidents/INCIDENT_ID/report.md' -o incident.md
+.venv/bin/pip install -e ./backend
+.venv/bin/uvicorn app.main:app --app-dir backend --reload
 ```
 
-## 查看證據圖與假說
+Stop an existing Uvicorn process with **Ctrl+C** before starting its replacement. After updating the application, refresh the browser with **Ctrl+Shift+R** to load the current interface.
 
-1. 選擇 **跨來源 · Web 探測 → SSH 可疑登入**。建議先取消勾選 **使用 AI**，按 **偵測並分析**，立即查看結果。
-2. 原有偵測結果仍為 **10 筆事件、3 個告警、1 個 Critical Incident**。
-3. 在 **Hypothesis-driven Investigation** 比較 H1 單一攻擊者、H2 共享來源／NAT、H3 攻擊後合法登入。觀察事實由後端建立，推論另列；展開支持／反駁／中性證據並點擊引用。
-4. 在 **Incident Evidence Graph** 查看實線（觀察／記錄關係）與虛線（推論）。點選 H1／H2／H3 標題可高亮相關節點與關係；點選事件、告警或 Incident 節點可開啟既有證據視窗。
-5. 勾選 **顯示事件節點** 查看完整 20 個節點；使用 **顯示推論**、縮放與範圍選單調整圖形。概覽預設隱藏事件節點，以保持可讀性。
-6. 按 **唯讀調查（不使用 AI）**。示範有三個可回答問題，預設預算 4 會查完後停止，說明剩餘問題需要 auditd、身份歸屬與歷史基線。
-7. 按 **AI 比較假說**，讓 Qwen 解釋 競爭假說 與剩餘不確定性。若還有未回答問題，AI 先選擇問題；查證過的問題不會重複查詢。
-8. 可將 **本輪工具預算** 改成 `1`，展示調查如何在預算耗盡時停止；每個可回答問題也可單獨按 **唯讀查詢**。
-9. 多個 Incident 時，先在假說區的下拉選單切換，再調查該 Incident。掃描時使用 AI 預設聚焦嚴重程度最高、時間最新的一個 Incident。
+Ollama is optional. Imports, detection, evidence graphs, hypotheses, read-only queries, history, and report exports work without it.
 
-不需要 Ollama 即可使用圖形、規則假說、證據導航與唯讀查詢。完整 AI 調查的本機 CPU 實測約需 6 分鐘，耗時依硬體而異；已先完成唯讀查詢時會跳過問題選擇回合，通常較快。
+### 2. Enable optional AI analysis
 
-示範時間線：
+Install Ollama separately, then download the model:
 
-| 時間（UTC+8） | 證據 |
+```sh
+ollama pull qwen3:4b
+```
+
+If Ollama is not already running, start it in a separate terminal:
+
+```sh
+ollama serve
+```
+
+The default endpoint is `http://127.0.0.1:11434`. Leave Ollama running alongside the application. The dashboard displays whether the configured model is available.
+
+### 3. Try the demonstration
+
+1. In **Log sample**, select **Cross-source · Web reconnaissance → SSH suspicious authentication**.
+2. Leave **Use AI** unchecked and click **Detect and analyze**.
+3. Expect **10 events, 3 alerts, and 1 Critical incident**.
+4. Select the incident, inspect its timeline and evidence, and compare the three hypotheses.
+5. Click **Read-only investigation (no AI)** to answer questions using the imported snapshot.
+6. Click **Download Markdown** to export the report.
+7. If Ollama is ready, click **Compare hypotheses with AI** for an English AI assessment.
+
+The sample records four sensitive-path probes, five failed SSH authentications for `admin`, and a successful authentication from the same IP. **Critical indicates investigation priority, not confirmed compromise.** The successful authentication may be legitimate; the sample has no post-login process, privilege-escalation, data-access, or exfiltration evidence.
+
+## Dashboard operating guide
+
+### Import your own logs
+
+1. Under **Import local logs**, click **Choose log files** and select one or more local files.
+2. For each file, explicitly select **SSH authentication** or **Nginx combined access**. The application does not inspect file contents to automatically determine the format.
+3. Set **SSH year** to the year the SSH logs were recorded. Traditional SSH syslog timestamps omit the year and timezone. The host timezone is configured through `LOG_TIMEZONE`; Nginx entries use their own year and timezone offset.
+4. Leave **Use AI** unchecked for an initial deterministic scan, then click **Import and detect**. If checked, AI analysis is included in the scan request.
+5. Review the per-file feedback: total lines, accepted lines, skipped lines, duplicate lines, and diagnostics with line numbers where available.
+
+Valid records remain usable when other lines or files are malformed, empty, or incorrectly encoded. Each file exposes up to 100 diagnostics and reports how many additional diagnostics were omitted. If no events can be parsed, the request fails and no completed scan is added to history. Size and file-line limits reject the import; individual overlong lines are skipped with diagnostics.
+
+For a reproducible upload demonstration, select both files below:
+
+| File | Log type | SSH year |
+| --- | --- | --- |
+| `samples/scenarios/multi_stage_access.log` | Nginx combined access | Not applicable |
+| `samples/scenarios/multi_stage_auth.log` | SSH authentication | `2026` |
+
+The expected result is **10 events, 3 alerts, and 1 incident**. Combined logs must belong to the same host or analysis scope and use consistent timestamps. Import different hosts or different SSH years in separate scans; SSH files in one request share the configured year and host timezone.
+
+### Select an incident and inspect evidence
+
+- **Current scan** shows the scan ID, creation time, unique event count, alert count, incident count, and removed duplicates.
+- **Rule alerts** supports searching and filtering. Select an alert to view its summary, normalized fields, associated raw logs, and suggested checks.
+- In **Incident list and timeline**, click **Select incident**. Its timeline, hypotheses, graph scope, report link, and saved AI assessment share the selected incident context.
+- Click an evidence ID, event node, alert node, or incident node to inspect the original evidence. The detail dialog shows normalized fields and raw logs where present.
+- Alert status controls are **page-local**. Marking an alert as resolved does not persist that status to SQLite.
+
+No alerts means no incident or attack hypotheses are created. Parsing results and the saved scan remain available.
+
+### Explore the graph and competing hypotheses
+
+The **Incident Evidence Graph** distinguishes recorded relationships from inference:
+
+| Representation | Meaning |
 | --- | --- |
-| 15:01 | 四次敏感路徑探測，形成 Web enumeration 告警 |
-| 15:05 | 同 IP 對 admin 五次認證失敗，形成 SSH brute-force 告警 |
-| 15:06 | 同 IP、同帳號成功登入，形成 suspicious-login 告警 |
+| Solid blue edge | Observed or recorded relationship |
+| Dashed orange edge | Unverified inferred relationship |
+| Green highlight | Evidence supporting the selected hypothesis |
+| Red highlight | Evidence contradicting the selected hypothesis |
+| Gray highlight | Neutral evidence |
 
-Critical 是調查優先程度，**不代表已確認入侵**。成功登入可能合法；樣本沒有登入後程序、權限提升、資料存取或外洩證據。
+Select a hypothesis heading to highlight its evidence. Use **Scope**, **Show event nodes**, **Show inferred edges**, and **Zoom** to adjust the graph. **Clear hypothesis focus** removes the overlay. Event nodes are hidden by default for readability; enabling them shows the demonstration's full 20-node graph.
 
-Ollama 不可用或輸出未通過驗證時，規則告警、Incident、關係圖、規則假說與已完成的唯讀查詢仍可查看。前端狀態標記只保存在當頁，不會持久保存。
+The demonstration compares:
 
-## 偵測與關聯規則
+- **H1:** possible related activity by a single attacker.
+- **H2:** separate activities behind a shared IP or NAT.
+- **H3:** a legitimate login following attack attempts.
 
-- **SSH brute force**：同 IP 在 60 秒內至少五次失敗認證。
-- **Suspicious login**：同 IP、同帳號成功登入，之前 10 分鐘內至少五次失敗；同一時間點不視為「先失敗後成功」。
-- **SQLi attempt**：解碼請求中的 UNION SELECT、相同值比較、延遲函式、information_schema、破壞性 SQL 或引號接 SQL 註解。一般 `--` 字串不單獨觸發。
-- **XSS attempt**：script 標籤、事件 handler 或 javascript URL；一般 img 標籤與單純討論 script/javascript 不單獨觸發。
-- **Web enumeration**：同 IP 60 秒內至少四次敏感路徑請求、三個不同路徑，至少兩次 HTTP 404。單次 `/.env` 不形成 enumeration。
-- **Incident**：按同 IP 與證據時間分組，群組跨度最多 10 分鐘，避免相鄰事件無限串接。只有有序 Web enumeration → 同帳號至少五次 SSH 失敗 → 可疑登入，才提升為 Critical；其餘維持告警的最高嚴重程度。
+Each hypothesis separates supporting, contradicting, neutral, and missing evidence. Observed facts are established by the backend; model explanations are labeled as inference. H2 has no direct NAT attribution evidence. SSH/Nginx logs alone cannot establish whether the successful login in H1/H3 belonged to an attacker or the account owner.
 
-IP 可能共用於 NAT／代理，因此 Incident 表示調查關聯假說。SQLi／XSS 告警只表示攻擊嘗試，HTTP 200 不足以判定成功利用。
+Support scores are **uncalibrated evidence-support measures**, not compromise probabilities, and need not sum to 1. The current AI score ceilings for H1, H2, and H3 are 0.65, 0.35, and 0.55 respectively. These are conservative implementation limits, not statistical estimates.
 
-## AI 與唯讀工具
+`CONTAINS` denotes rule-generated group membership. `FOLLOWED_BY` denotes time order. Neither establishes causation or confirms a single attack campaign.
 
-AI 主要輸入為聚焦 Incident 的觀察事實、確定性圖形概覽、競爭假說與調查問題。原始 `raw_log` 不送入模型；模型可取得正規化帳號、IP、URI 等資料，這些字串都視為不可信資料。
+### Run read-only investigation
 
-工具僅查詢**本次掃描快照**：
+1. Select an incident.
+2. Set **Tool budget this round** to a value from `0` to `12` (default: `4`).
+3. Click **Read-only investigation (no AI)** to investigate available questions, or click a question's **Read-only query** button to query that question with a budget of one call.
+4. Review the answers, cited evidence, truncation notices, tool trace, and **Investigation status**.
+5. With Ollama available, click **Compare hypotheses with AI**. AI can prioritize existing answerable questions and compare the supplied explanations.
 
-| 工具 | 功能 |
+Each request runs at most one bounded tool-query round. Failed queries also consume the budget. Already answered questions are not queried again. The demonstration has three answerable questions; budget `4` checks them and stops because the remaining questions require unavailable telemetry. Set budget `1` on a fresh scan to demonstrate stopping at the budget limit.
+
+Additional query results become observed facts and neutral evidence. They do not automatically confirm malicious activity or legitimate login. Empty results describe only this scan and do not establish the absence of activity on the real host.
+
+### Export a report
+
+Click **Download Markdown** beside an incident or in its investigation controls.
+
+The report includes incident metadata, affected IPs/accounts, timeline, associated alerts, observed facts, evidence IDs, competing hypotheses, unresolved questions, missing telemetry, and an evidence appendix. AI assessment and recommendations are included when available and labeled separately as model-generated inference.
+
+Reports work without Ollama. Log strings are quoted as data so they cannot masquerade as report headings or instructions. Downloaded reports contain raw evidence and should be handled accordingly.
+
+### Reopen or delete a saved scan
+
+- Under **Scan history**, click **Open** to restore a scan, its answered questions, and available AI results. Reopening does not rerun detection or call the model.
+- After a backend restart, the dashboard opens the latest saved scan. If history is empty, the first page load creates the cross-source demonstration scan.
+- Click **Refresh** or **Load more** to update or browse history.
+- Click **Delete**, then **Delete scan** in the confirmation dialog, to remove one scan and its associated evidence and investigation records. Other scans are retained.
+
+## Configuration
+
+Set environment variables before starting the backend.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama endpoint reachable from the backend |
+| `OLLAMA_MODEL` | `qwen3:4b` | Installed model used for structured analysis |
+| `OLLAMA_TIMEOUT` | `300` | Timeout in seconds for each model request |
+| `LOG_TIMEZONE` | `Asia/Taipei` | Host timezone for SSH timestamps without an offset |
+| `COPILOT_DB_PATH` | `data/copilot.sqlite3` | Local SQLite database path |
+| `UPLOAD_MAX_FILES` | `8` | Maximum files per upload |
+| `UPLOAD_MAX_FILE_BYTES` | `2097152` | Maximum size per file: 2 MiB |
+| `UPLOAD_MAX_TOTAL_BYTES` | `8388608` | Maximum combined file size: 8 MiB |
+| `UPLOAD_MAX_LINES` | `10000` | Maximum lines per file; exceeding it rejects the import |
+| `UPLOAD_MAX_LINE_BYTES` | `16384` | Maximum bytes per line; longer lines are skipped |
+
+For example, to interpret SSH logs recorded in UTC:
+
+```sh
+LOG_TIMEZONE=UTC .venv/bin/uvicorn app.main:app --app-dir backend --reload
+```
+
+Built-in SSH samples use year `2026`. Uploads use the year specified by the analyst; the default is the current year. Nginx timestamps include their own year and offset.
+
+## Supported formats and detection rules
+
+Uploads accept UTF-8 and UTF-8 BOM text. Supported formats are traditional OpenSSH syslog authentication entries and Nginx **combined** access logs.
+
+- SSH parsing covers `Failed password` and `Accepted password`, `Accepted publickey`, or `Accepted keyboard-interactive/pam` entries.
+- Other SSH operational messages are reported as skipped. Compressed `message repeated N times` records are not expanded into N independent events, which can undercount attempts.
+- Repeated records within a scan are deduplicated by normalized event ID so duplicate evidence does not inflate thresholds. Per-file accepted-line counts and scan-wide duplicate counts are reported separately.
+
+| Rule | Current behavior |
 | --- | --- |
-| `search_events` | 依來源 IP、帳號、含時區的起訖時間查詢事件 |
-| `get_user_logins` | 查詢指定帳號的成功登入 |
-| `get_related_alerts` | 查詢指定來源 IP 的告警 |
-| `get_incident_timeline` | 查詢指定 Incident 的時間線 |
+| SSH brute force | At least five failed authentications from one IP within 60 seconds |
+| Suspicious login | Successful authentication from the same IP and account after at least five failures in the preceding 10 minutes; failures at the exact success timestamp do not count as prior failures |
+| SQLi attempt | Decoded request patterns such as UNION SELECT, equal-value comparisons, delay functions, information_schema, destructive SQL, or a quote followed by an SQL comment; a plain `--` string alone does not trigger an alert |
+| XSS attempt | Script tags, event handlers, or javascript URLs; ordinary image tags or mentions of script/javascript alone do not trigger an alert |
+| Web enumeration | At least four sensitive-path requests from one IP within 60 seconds, covering three distinct paths and including at least two HTTP 404 responses; a single `/.env` request does not trigger enumeration |
+| Incident correlation | Group by IP and evidence time with a maximum 10-minute span, preventing indefinite chaining; Critical requires ordered web enumeration, at least five SSH failures for the login account, and suspicious successful authentication |
 
-工具採白名單，不接受任意檔案路徑、命令或變更操作。後端從已驗證的假說模板建立調查問題與固定工具參數；AI 只能選擇既有 `question_ids`，不能任意新增工具或參數。
+Other incidents retain the highest associated alert severity. An IP may be shared through NAT or a proxy. SQLi/XSS alerts indicate attempts; HTTP 200 alone does not prove exploitation.
 
-每個請求最多 **一輪工具查詢**；工具預算預設 4、可設定 0–12，錯誤查詢也計入預算。查詢最多回傳 100 筆，並標示 `total`／`truncated`。模型跳過問題或輸出無效計畫時，後端依可信問題順序補查；紀錄的 `origin: model` 表示模型選擇，`origin: rule` 表示後端安排。查到的額外記錄會加入觀察事實並列為中性證據；不會因此自動宣稱入侵或合法登入。
+Sample directories:
 
-調查會記錄停止原因：預算耗盡、單輪上限、可回答問題完成，或剩餘問題需要未提供的遙測。空結果只表示本次樣本沒有符合條件的記錄，不能證明真實主機沒有程序、sudo 或其他活動。
+- `samples/ssh/`: SSH samples.
+- `samples/`: Nginx samples.
+- `samples/scenarios/`: combined SSH/Nginx scenarios.
 
-最終分析使用 Ollama JSON schema 與 Pydantic 驗證：
+The legacy `ssh:compromised_login.log` produces two brute-force alerts under the strict account-matching rule. The successful `deploy` login has fewer than five preceding failures for that account; failures for other accounts cannot establish credential guessing against `deploy`.
+
+## AI behavior and language
+
+AI receives the focused incident's observed facts, graph overview, competing hypotheses, and investigation questions. `raw_log` is not sent to the model. Normalized IPs, account names, and request targets remain untrusted data.
+
+The interface and application-generated reports use English. Ollama's analysis and question-selection prompts explicitly require English human-readable output. The backend checks all analysis text fields for Chinese/CJK prose, permitting original evidence identifiers; if necessary, it requests one English rewrite. If the rewrite still fails the language check, the AI result is hidden and an English error is shown. Deterministic findings remain available.
+
+A first incident investigation may use a planning request followed by a comparison request. An English correction can add one model request. Each request has its own timeout. Earlier CPU measurements took approximately six minutes for a complete AI investigation; this is hardware-dependent and is not a benchmark for the current English-output changes. Running read-only queries first can avoid the planning request.
+
+Previously saved application labels are refreshed for English presentation without changing evidence IDs or alert verdicts. Older non-English AI prose is retained locally but is not displayed as an English assessment. Click **Compare hypotheses with AI** to regenerate it. Original logs, filenames, account names, and evidence values retain their original text. The operating system controls the language of its native file-selection dialog.
+
+After updating, restart the backend and force-refresh the browser. Versioned asset URLs and `Cache-Control: no-store` help prevent stale interface text.
+
+### Read-only tools
+
+All tools query the **current scan snapshot**:
+
+| Tool | Purpose |
+| --- | --- |
+| `search_events` | Filter events by source IP, account, and timezone-aware time bounds |
+| `get_user_logins` | Retrieve successful authentications for a specified account |
+| `get_related_alerts` | Retrieve alerts for a specified source IP |
+| `get_incident_timeline` | Retrieve an incident's recorded timeline |
+
+Tools use an allowlist and do not accept arbitrary file paths, shell commands, or system-changing operations. The backend supplies questions and fixed tool arguments; AI can select existing `question_ids` but cannot create tools or arbitrary arguments.
+
+Queries return at most 100 records and include `total` and `truncated`. Model-selected calls are marked `origin: model`; backend-selected calls are marked `origin: rule`. If a model skips questions or supplies an invalid plan, the backend uses its verified question order.
+
+Final analysis uses an Ollama JSON schema and Pydantic validation. The following is an illustrative structure; the IDs are placeholders:
 
 ```json
 {
-  "summary": "...",
-  "assessment": [{"text": "...", "evidence_ids": ["SSH-..."]}],
-  "recommendations": [{"text": "...", "evidence_ids": ["INC-..."]}],
-  "missing_evidence": ["缺少登入後程序活動"],
+  "summary": "Authentication attempts require investigation; compromise is unconfirmed.",
+  "assessment": [{"text": "Repeated failures appear in the evidence.", "evidence_ids": ["SSH-..."]}],
+  "recommendations": [{"text": "Compare activity with account owner records.", "evidence_ids": ["INC-..."]}],
+  "missing_evidence": ["Post-login process telemetry is missing."],
   "confidence": 0.6,
   "hypothesis_evaluations": [{
     "hypothesis_id": "HYP-...",
     "status": "plausible",
     "confidence": 0.55,
-    "inference": "此解釋可能符合部分證據，但操作者身份仍未知。",
+    "inference": "This explanation fits some evidence, but operator identity remains unknown.",
     "evidence_ids": ["SSH-..."],
     "graph_edge_ids": ["EDGE-..."]
   }]
 }
 ```
 
-每個判讀、建議與假說比較都必須引用真實證據，假說 ID 與圖形邊 ID 也會驗證。AI 不可建立／修改圖形或告警；沒有來源身份或擁有者證據時，不允許將假說升級為確定結果。格式錯誤或不存在的引用會隱藏整份 AI 結果；後端也會保守過濾非唯讀建議，若全部被移除則顯示預設唯讀調查方向，並透過 `ai_warnings` 說明。這不是語意安全的完整證明；ID 驗證與詞彙過濾無法保證所有文字正確，仍需人工檢查。報告的 `confidence` 是模型對分析完整度的自評；假說的 `confidence` 是證據支持程度，後端會依資料不足設定分數上限；圖形邊的分數則是規則對關係的支持程度。三者均未經統計校準、不是入侵機率，假說分數不需要合計為 1。
+Claims and comparisons must reference real evidence. Hypothesis IDs and graph-edge references are checked. AI cannot create or modify alerts or the graph, and insufficient attribution prevents definitive conclusions. Invalid formats or references hide the result. Non-read-only recommendations are conservatively filtered; if none remain, a default read-only suggestion is shown with an `ai_warnings` notice.
 
-JSON schema 和 tool calling 接法參考 [Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs) 與 [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling)。同時設定 `think=false` 並加入 [Qwen3 官方 `/no_think` 開關](https://qwenlm.github.io/blog/qwen3/)，降低思考內容外漏及生成耗時。
+These checks are not a proof of semantic correctness. Human review is still required. Analysis confidence is the model's self-rating of completeness; hypothesis confidence and inferred-edge confidence describe evidence or rule support. None is statistically calibrated or a compromise probability.
 
-## 樣本
+Implementation references: [Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs), [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling), and [Qwen3](https://qwenlm.github.io/blog/qwen3/). The client sets `think=false` and includes `/no_think` in its requests.
 
-原有 SSH 樣本在 `samples/ssh/`，Nginx 樣本在 `samples/`。新跨來源樣本在 `samples/scenarios/`，可從選單直接使用。
+## Storage and retention
 
-修正帳號比對後，原有 `ssh:compromised_login.log` 從 3 個告警改為 **2 個 brute-force 告警**：成功登入帳號 deploy 的失敗次數不足五次，不能用其他帳號的失敗推論 deploy 遭猜測。樣本原文保留。
+SQLite stores scan metadata, alerts, incidents, hypotheses, and investigation results as JSON in `scans`. The `events` table stores normalized events and their raw log lines, linked to the scan with cascading deletion. Writes are transactional, and scans are published only after a successful commit. Graphs are reconstructed from persisted evidence on reload.
 
-## API
+There is no automatic expiry: scans remain until deleted. The `data/` directory is excluded from Git. Original uploaded files are not separately retained; accepted lines are stored as evidence, while skipped lines retain diagnostics rather than their raw content. Logs are not placed in browser storage or routine application logs.
 
-- `GET /api/health`、`GET /api/ollama/status`：服務與模型狀態。
-- `GET /api/samples`：可用樣本名稱。
-- `GET /api/events`、`GET /api/alerts`：預設 SSH 樣本資料。
-- `POST /api/scan`：偵測、關聯並選擇性分析，回傳 `scan_id`、`alerts`、`incidents`、`ai_analysis`、`investigation`、`ai_warnings`、`hypotheses`、`focused_incident_id`。
-- `GET /api/scans/{scan_id}/graph`：本次掃描的確定性節點與關係圖。
-- `GET /api/scans/{scan_id}/hypotheses`：各 Incident 的假說、觀察事實、調查問題及停止原因。
-- `POST /api/scans/{scan_id}/incidents/{incident_id}/investigate`：調查指定 Incident，例如 `{"with_ai":false,"tool_budget":4}`；可傳 `question_ids` 執行指定的可回答問題。
-- `GET /api/scans/{scan_id}/evidence/{evidence_id}`：本機證據，包含原始日誌。
-- `GET /api/scans/{scan_id}/tools/{tool_name}`：唯讀調查，參數以 query string 傳入。
+SQLite is a local plaintext file, created with owner-only read/write permissions. Deletion removes database records logically; it does not guarantee erasure from backups or residual disk storage. Exported reports also contain original evidence.
 
-單一情境：
+This MVP is a single-user local service. Keep the default `127.0.0.1` binding and use one Uvicorn worker; multiple workers can have conflicting investigation caches. Memory caches up to 32 scans, while SQLite preserves saved scans across reloads and restarts. There is no multi-user authorization or cross-host identity management. Future rule changes may affect reconstructed graph relationships, while original evidence IDs remain unchanged.
+
+## API reference
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/health` | Backend health |
+| `GET /api/ollama/status` | Ollama connection and configured-model availability |
+| `GET /api/samples` | Available sample identifiers |
+| `GET /api/events` | Events from the default SSH sample |
+| `GET /api/alerts` | Alerts from the default SSH sample |
+| `GET /api/import/config` | Upload limits, default SSH year, and host timezone |
+| `POST /api/scan` | Scan bundled samples with optional AI analysis |
+| `POST /api/scans/upload` | Import files with matching source types through multipart/form-data |
+| `GET /api/scans?limit=20&offset=0` | Paginated history metadata without raw logs |
+| `GET /api/scans/{scan_id}` | Reopen a saved scan and its investigation results |
+| `DELETE /api/scans/{scan_id}` | Delete one scan and its associated records |
+| `GET /api/scans/{scan_id}/graph` | Evidence graph |
+| `GET /api/scans/{scan_id}/hypotheses` | Incident hypotheses, facts, questions, and stopping reasons |
+| `POST /api/scans/{scan_id}/incidents/{incident_id}/investigate` | Bounded investigation of a selected incident |
+| `GET /api/scans/{scan_id}/evidence/{evidence_id}` | Evidence details, including raw logs where present |
+| `GET /api/scans/{scan_id}/tools/{tool_name}` | Read-only query with query-string arguments |
+| `GET /api/scans/{scan_id}/incidents/{incident_id}/report.md` | Download an incident Markdown report |
+
+### Scan a bundled scenario
 
 ```sh
 curl -X POST http://127.0.0.1:8000/api/scan \
@@ -206,59 +308,127 @@ curl -X POST http://127.0.0.1:8000/api/scan \
   -d '{"sample":"scenario:multi_stage","with_ai":false}'
 ```
 
-多個既有樣本一起分析（`samples` 有設定時優先於 `sample`；重複事件會去重）：
+To combine bundled samples, provide `samples`, which takes precedence over `sample`:
 
 ```sh
 curl -X POST http://127.0.0.1:8000/api/scan \
   -H 'Content-Type: application/json' \
-  -d '{"samples":["ssh:suspicious_login.log","nginx:enumeration.log"],"with_ai":true}'
+  -d '{"samples":["ssh:suspicious_login.log","nginx:enumeration.log"],"with_ai":false}'
 ```
 
-不同時間或不同 IP 的樣本不會強行產生多階段 Incident。取得 `scan_id` 後，可將其代入：
+Repeated events are deduplicated. Unrelated timestamps or IPs do not automatically become a multi-stage incident.
+
+### Upload SSH and Nginx files
+
+Provide one `source_types` entry for each `files` entry, in matching order. Optional fields are `ssh_year`, `with_ai`, and `tool_budget`.
 
 ```sh
+curl -X POST http://127.0.0.1:8000/api/scans/upload \
+  -F 'files=@samples/scenarios/multi_stage_access.log' -F 'source_types=nginx' \
+  -F 'files=@samples/scenarios/multi_stage_auth.log' -F 'source_types=ssh' \
+  -F 'ssh_year=2026' -F 'with_ai=false' -F 'tool_budget=4'
+```
+
+The response includes `scan_id`, counts, alerts, incidents, per-file feedback, hypotheses, and optional AI results.
+
+### Investigate and export
+
+Replace `SCAN_ID` and `INCIDENT_ID` below with values returned by a scan or saved history:
+
+```sh
+curl 'http://127.0.0.1:8000/api/scans?limit=20&offset=0'
 curl 'http://127.0.0.1:8000/api/scans/SCAN_ID/graph'
 curl 'http://127.0.0.1:8000/api/scans/SCAN_ID/hypotheses'
+
 curl -X POST 'http://127.0.0.1:8000/api/scans/SCAN_ID/incidents/INCIDENT_ID/investigate' \
   -H 'Content-Type: application/json' \
   -d '{"with_ai":false,"tool_budget":4}'
+
+curl 'http://127.0.0.1:8000/api/scans/SCAN_ID/incidents/INCIDENT_ID/report.md' \
+  -o incident.md
 ```
 
-掃描與調查結果持續儲存在 SQLite，重啟／reload 後可以重開；記憶體只快取最近 32 次掃描。此 MVP 請使用單一 Uvicorn worker，避免不同程序的快取互相覆寫調查結果。
+Set `with_ai` to `true` to include AI comparison. To investigate a specific available question, provide its ID in `question_ids`, for example `{"with_ai":false,"tool_budget":1,"question_ids":["QUESTION_ID"]}`. Use IDs returned by the hypotheses endpoint; do not copy placeholder IDs literally.
 
-## 連線排查與驗證
+## Troubleshooting
 
-測試需先安裝 `.venv/bin/pip install -e './backend[test]'`。完整測試與評估不使用 Ollama；請參閱 [docs/evaluation.md](docs/evaluation.md) 的資料來源、實測數字與限制。
+| Symptom | Action |
+| --- | --- |
+| Dashboard cannot reach the API | Start Uvicorn from the repository root and open `http://127.0.0.1:8000` |
+| Ollama is unavailable | From the environment running Uvicorn, run `curl http://127.0.0.1:11434/api/tags`; confirm Ollama is running and `qwen3:4b` is installed |
+| Ollama works on the host but not in a container/sandbox | `127.0.0.1` points to that environment; run the backend on the host or set a reachable `OLLAMA_BASE_URL` |
+| Model request times out | Check connectivity and hardware performance; `OLLAMA_TIMEOUT` applies to each request and can be configured before startup |
+| Interface still shows old text | Restart the old backend process and force-refresh the browser; regenerate older AI assessments with **Compare hypotheses with AI** |
+| HTTP 400 during upload | Check the multipart request and file count |
+| HTTP 413 during upload | Reduce file size, combined upload size, or lines per file, or configure the documented limits |
+| HTTP 422 during upload | Check source types, UTF-8 encoding, supported log format, SSH year, and per-file diagnostics |
+| HTTP 503 while saving | Check database-directory write permissions and available disk space; the operation was not successfully saved |
+| Missing multi-stage correlation | Check that the logs share an analysis scope, source IP, account, and compatible year/timezone; stages must satisfy the ordering rules |
 
+## Tests and evaluation
 
-從**執行 Uvicorn 的環境**執行 `curl http://127.0.0.1:11434/api/tags`。容器／sandbox 的 `127.0.0.1` 不一定是主機；可在主機終端執行後端，或設定該環境可達的 `OLLAMA_BASE_URL`。
+Install development test dependencies:
 
 ```sh
-COPILOT_DB_PATH=/tmp/copilot-regression.sqlite3 PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v
+.venv/bin/pip install -e './backend[test]'
+```
+
+Run the offline test suite and evaluation from the repository root:
+
+```sh
+COPILOT_DB_PATH=/tmp/copilot-regression.sqlite3 PYTHONPATH=backend \
+  .venv/bin/python -m unittest discover -s backend/tests -v
+
+PYTHONPATH=backend .venv/bin/python scripts/evaluate.py \
+  --output /tmp/copilot-evaluation.json
+
 node --check app.js
 node --check graph.js
 node --check hypotheses.js
-# 可選：已安裝 Firefox 的主機環境，使用獨立臨時 profile 做實際 DOM 與 API 驗證
+```
+
+Optional browser workflow checks require Firefox and permission to start a loopback server. They use a separate temporary profile:
+
+```sh
 PYTHONPATH=backend .venv/bin/python scripts/browser_smoke.py
 ```
 
-目前沒有即時收集、firewall／auditd／process 日誌或主機行為基線。事件專屬欄位仍保留相容的現有模型，尚未全面遷移至 attributes。原先展示用的活動／威脅分布圖已替換為匯入、歷史與目前掃描資訊。
+To capture controlled local HTTP requests in Nginx combined format:
 
+```sh
+.venv/bin/python scripts/collect_lab.py --output /tmp/copilot-lab
+```
 
-## 新功能實作位置
+Upload `/tmp/copilot-lab/access.log` as Nginx to inspect the capture. This script uses a Python HTTP emitter, not an actual Nginx or SSH daemon, and does not establish successful exploitation.
 
-| 檔案 | 功能 |
+Dataset provenance, methodology, recorded measurements, reproduction commands, and limitations are documented in [docs/evaluation.md](docs/evaluation.md), with machine-readable results in [docs/evaluation-results.json](docs/evaluation-results.json). The methodology document is currently in Traditional Chinese. External Loghub OpenSSH fixtures carry their research/academic-use license in `backend/tests/fixtures/external/LOGHUB_LICENSE`; preserve that notice and the required attribution when using or distributing those fixtures.
+
+Precision/recall claims apply only to labeled fixtures. Unlabeled external logs support descriptive counts, not real-world detection-accuracy claims. Recorded evaluation results predate the latest English-presentation changes and should not be treated as verification of those changes.
+
+## Implementation map
+
+| File | Responsibility |
 | --- | --- |
-| `backend/app/intelligence_models.py` | 圖形、假說、問題、AI 比較與調查結果契約 |
-| `backend/app/graph.py` | 從 EvidenceStore 建立有證據引用的確定性圖形 |
-| `backend/app/hypotheses.py` | 競爭假說模板、證據分類、觀察事實與問題 |
-| `backend/app/investigator.py` | 有界問題選擇、唯讀查詢、停止條件與 AI 比較驗證 |
-| `backend/app/importer.py` | 有上限的匯入與逐行診斷 |
-| `backend/app/storage.py` | SQLite 交易保存、恢復、歷史與刪除 |
-| `backend/app/reports.py` | Incident Markdown 匯出，原始日誌作為 literal data |
-| `graph.js` | SVG 關係圖、節點／邊證據導航、篩選與假說高亮 |
-| `hypotheses.js` | 競爭假說卡片、觀察事實、缺少證據與問題互動 |
+| `backend/app/main.py` | Scan, import, history, investigation, evidence, and report APIs |
+| `backend/app/parsers/` | SSH and Nginx parsing |
+| `backend/app/detectors/` | Deterministic attack-attempt rules |
+| `backend/app/incidents.py` | Incident grouping and timelines |
+| `backend/app/intelligence_models.py` | Graph, hypothesis, question, and investigation contracts |
+| `backend/app/graph.py` | Deterministic graph with evidence references |
+| `backend/app/hypotheses.py` | Hypothesis templates, evidence categories, facts, and questions |
+| `backend/app/investigator.py` | Bounded planning, read-only queries, stopping, and AI comparison |
+| `backend/app/copilot.py` | Ollama requests, evidence validation, and recommendation filtering |
+| `backend/app/importer.py` | Bounded imports and per-line diagnostics |
+| `backend/app/storage.py` | SQLite transactions, restore, history, and deletion |
+| `backend/app/reports.py` | Evidence-backed Markdown export |
+| `backend/app/language.py` | English output policy and presentation checks |
+| `backend/app/localization.py` | English presentation of older saved scans |
+| `app.js` | Scan/import workflow, incident context, history, and evidence details |
+| `graph.js` | SVG graph, filtering, evidence navigation, and hypothesis highlighting |
+| `hypotheses.js` | Hypothesis cards, questions, and investigation controls |
 
-圖形與假說不依賴 LLM、不需要圖形資料庫。所有資料限定在當次掃描，沒有跨主機身份歸屬功能。實線包含日誌觀察與後端建立的記錄／群組關係；`CONTAINS` 表示群組成員，`FOLLOWED_BY` 只表示時間先後，均不是因果證明。
+## Current limitations
 
-H2 目前沒有直接 NAT 證據，因此保持「證據不足」或低支持程度的合理假說。H1／H3 不能由 SSH/Nginx 判定成功登入者是否為攻擊者／擁有者。新增 auditd 等資料前，後端對 H1、H2、H3 的 AI 支持分數上限分別為 0.65、0.35、0.55；這是保守顯示規則，沒有統計校準。
+The MVP does not provide live log collection, multi-host attribution, firewall/auditd/process-log ingestion, historical host or login baselines, automatic remediation, or multi-user access control. Imported file boundaries do not establish host identity. Larger full-scan graphs may be slow; incident scope and hidden event nodes improve readability.
+
+SSH/Nginx evidence can describe suspicious attempts and authentication outcomes, but cannot establish operator identity, authorization, post-login activity, or confirmed compromise by itself. Missing telemetry remains unknown.

@@ -45,13 +45,13 @@ def correlate_incidents(alerts: list[SecurityAlert], window=timedelta(minutes=10
             ids = [a.id for a in group]
             incidents.append(Incident(
                 id="INC-" + sha256("|".join(ids).encode()).hexdigest()[:12],
-                title="可能的多階段伺服器入侵活動" if multistage else "相關安全告警調查",
+                title="Possible multi-stage server attack activity" if multistage else "Related security alert investigation",
                 severity=severity, source_ips=[ip],
                 usernames=sorted({a.username for a in group if a.username}), alert_ids=ids,
                 start_time=start, end_time=group[-1].timestamp,
                 attack_stages=list(dict.fromkeys(t.stage for t in timeline)), timeline=timeline,
-                correlation_reason=("同一來源 10 分鐘內依序出現 Web 探測、同帳號 SSH 密碼猜測與可疑成功登入。"
-                                    if multistage else "以同一來源 IP 與首筆證據起算 10 分鐘範圍建立調查群組。")
-                + "IP 可能共用；時間關聯不證明同一攻擊者或已入侵，需確認主機與帳號活動。",
+                correlation_reason=("The same source shows web reconnaissance, SSH password guessing, and suspicious successful authentication for the same account within 10 minutes."
+                                    if multistage else "Grouped by source IP within 10 minutes of the first evidence record.")
+                + "An IP may be shared. Time correlation does not prove a single attacker or compromise; verify host and account activity.",
             ))
     return sorted(incidents, key=lambda i: i.end_time, reverse=True)

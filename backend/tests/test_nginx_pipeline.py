@@ -38,7 +38,7 @@ class NginxDetectionTests(unittest.TestCase):
         xss = detect_nginx_alerts(self.load("xss.log"))
         self.assertEqual([alert.alert_type for alert in sqli], ["sqli_attempt", "sqli_attempt"])
         self.assertEqual([alert.alert_type for alert in xss], ["xss_attempt", "xss_attempt"])
-        self.assertTrue(all("攻擊嘗試" in alert.summary for alert in sqli + xss))
+        self.assertTrue(all("attempt" in alert.summary for alert in sqli + xss))
 
     def test_enumeration_correlates_multiple_paths_from_one_ip(self):
         alerts = detect_nginx_alerts(self.load("enumeration.log"))

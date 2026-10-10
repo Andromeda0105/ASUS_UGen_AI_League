@@ -105,6 +105,8 @@ class ScanRequest(BaseModel):
 
 
 class ScanResult(BaseModel):
+    content_language: str = "legacy"
+    presentation_version: int = 0
     sample: str
     event_count: int
     alerts: list[SecurityAlert]

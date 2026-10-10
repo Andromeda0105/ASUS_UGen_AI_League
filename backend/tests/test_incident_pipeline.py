@@ -33,9 +33,9 @@ def scenario():
 
 
 def report(ref):
-    return dict(summary="需調查可疑活動，尚不能確認入侵。", assessment=[dict(text="有規則告警", evidence_ids=[ref])],
-                recommendations=[dict(text="比對帳號擁有者活動", evidence_ids=[ref])],
-                missing_evidence=["缺少登入後程序活動"], confidence=0.6)
+    return dict(summary="Suspicious activity needs investigation; compromise is not confirmed.", assessment=[dict(text="Rule alerts are present.", evidence_ids=[ref])],
+                recommendations=[dict(text="Compare activity with account owner records.", evidence_ids=[ref])],
+                missing_evidence=["Post-login process telemetry is missing."], confidence=0.6)
 
 
 class CorrectnessTests(unittest.TestCase):
@@ -187,14 +187,14 @@ class InvestigationTests(unittest.TestCase):
         analysis = validate_analysis(json.dumps(data), self.store)
         notes = enforce_readonly_recommendations(analysis, self.store)
         self.assertEqual(len(analysis.recommendations), 1)
-        self.assertIn("2 項", notes[0])
+        self.assertIn("Removed 2", notes[0])
 
     def test_all_unsafe_recommendations_use_evidence_based_readonly_fallback(self):
         data = report(self.result.alerts[0].id)
         data["recommendations"][0]["text"] = "sudo ufw block 10.0.0.8"
         analysis = validate_analysis(json.dumps(data), self.store)
         self.assertTrue(enforce_readonly_recommendations(analysis, self.store))
-        self.assertTrue(analysis.recommendations[0].text.startswith("比對"))
+        self.assertTrue(analysis.recommendations[0].text.startswith("Compare"))
         self.assertEqual(analysis.recommendations[0].evidence_ids, [self.store.incidents[0].id])
 
     def test_backend_seeds_evidence_when_model_skips_tools(self):

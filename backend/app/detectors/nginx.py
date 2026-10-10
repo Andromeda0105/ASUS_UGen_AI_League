@@ -56,13 +56,13 @@ class SQLiDetector:
                     id=f"NGX-SQLI-{len(alerts) + 1:04d}",
                     timestamp=event.timestamp,
                     alert_type="sqli_attempt",
-                    title="SQL Injection 攻擊嘗試",
+                    title="SQL Injection attempt",
                     severity=Severity.HIGH,
                     source_ip=event.source_ip,
-                    evidence=[f"請求路徑包含可疑 SQL 特徵：{', '.join(matches[:3])}", f"HTTP {event.status_code}"],
+                    evidence=[f"Suspicious SQL patterns in request target: {', '.join(matches[:3])}", f"HTTP {event.status_code}"],
                     related_events=[event],
-                    summary="Nginx 請求參數符合常見 SQL Injection 特徵。這代表攻擊嘗試；單憑 access log 無法確認應用程式是否成功遭利用。",
-                    recommendation="檢查對應應用程式路由是否使用參數化查詢，並比對該請求的應用程式及資料庫日誌。",
+                    summary="Nginx request parameters match common SQL injection patterns. This indicates an attempt; access logs alone cannot confirm successful application exploitation.",
+                    recommendation="Review whether the application route uses parameterized queries and compare application and database logs for this request.",
                 )
             )
         return alerts
@@ -83,13 +83,13 @@ class XSSDetector:
                     id=f"NGX-XSS-{len(alerts) + 1:04d}",
                     timestamp=event.timestamp,
                     alert_type="xss_attempt",
-                    title="XSS 攻擊嘗試",
+                    title="XSS attempt",
                     severity=Severity.HIGH,
                     source_ip=event.source_ip,
-                    evidence=[f"請求路徑包含可疑 XSS 特徵：{', '.join(matches[:3])}", f"HTTP {event.status_code}"],
+                    evidence=[f"Suspicious XSS patterns in request target: {', '.join(matches[:3])}", f"HTTP {event.status_code}"],
                     related_events=[event],
-                    summary="Nginx 請求參數包含可疑 HTML 或 JavaScript 片段。這代表攻擊嘗試，不代表腳本已在使用者瀏覽器執行。",
-                    recommendation="檢查相關頁面是否對輸出內容做適當編碼，並確認 Content Security Policy 與應用程式日誌。",
+                    summary="Nginx request parameters contain suspicious HTML or JavaScript. This indicates an attempt, not confirmed script execution in a browser.",
+                    recommendation="Review output encoding for the affected page, its Content Security Policy, and application logs.",
                 )
             )
         return alerts
@@ -146,17 +146,17 @@ class EnumerationDetector:
                             id=f"NGX-ENUM-{len(alerts) + 1:04d}",
                             timestamp=window_probes[-1][0].timestamp,
                             alert_type="web_enumeration",
-                            title="偵測到 Web 路徑列舉",
+                            title="Web path enumeration detected",
                             severity=Severity.MEDIUM,
                             source_ip=source_ip,
                             evidence=[
-                                f"{len(window_probes)} 次敏感路徑請求，涵蓋 {len(paths)} 個不同路徑（{int(self.window.total_seconds())} 秒內）",
-                                f"其中 {not_found_count} 次回應為 HTTP 404",
-                                "探測路徑：" + ", ".join(paths[:8]),
+                                f"{len(window_probes)} sensitive-path requests covering {len(paths)} distinct paths within {int(self.window.total_seconds())} seconds",
+                                f"{not_found_count} responses with HTTP status 404",
+                                "Probed paths: " + ", ".join(paths[:8]),
                             ],
                             related_events=[event for event, _ in window_probes],
-                            summary="同一來源在短時間內依序探測多個常見管理介面或敏感檔案路徑，行為符合自動化 Web enumeration。",
-                            recommendation="確認設定檔、版本控制資料及備份檔未暴露於 Web root，並檢查這些路徑是否有非 404 的回應。",
+                            summary="The same source probed multiple common administration or sensitive-file paths in a short period, consistent with automated web enumeration.",
+                            recommendation="Review whether configuration, version-control data, or backups are exposed under the web root, and check these paths for responses other than 404.",
                         )
                     )
                     start = end

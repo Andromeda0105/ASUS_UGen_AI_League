@@ -42,7 +42,7 @@ class ScanRepository:
         with self.connect() as db, db:
             db.execute('BEGIN IMMEDIATE')
             if getattr(store, 'persisted', False) and db.execute('SELECT id FROM scans WHERE id=?', (result.scan_id,)).fetchone() is None:
-                raise LookupError('掃描已被刪除。')
+                raise LookupError('The scan was deleted.')
             db.execute('''INSERT INTO scans VALUES (?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET payload=excluded.payload''',
                 (result.scan_id, result.created_at.isoformat(), result.sample,
@@ -64,7 +64,10 @@ class ScanRepository:
             events = [LogEvent.model_validate_json(row[0]) for row in
                       db.execute('SELECT payload FROM events WHERE scan_id=? ORDER BY id', (scan_id,))]
         events.sort(key=lambda e: (e.timestamp, e.id))
+        from app.localization import refresh_legacy_labels, refresh_legacy_reports
+        refresh_legacy_labels(result, events)
         store = EvidenceStore(events, result.alerts, result.incidents)
+        refresh_legacy_reports(store, result)
         # Persist answered questions, AI output and scores, not a newly reset investigation.
         store.hypothesis_reports = {r.incident_id: r for r in result.hypotheses}
         store.result = result
@@ -72,12 +75,13 @@ class ScanRepository:
         return store
 
     def history(self, limit=50, offset=0):
+        from app.localization import english_sample_label
         with self.connect() as db:
             db.execute('BEGIN')
             total = db.execute('SELECT COUNT(*) FROM scans').fetchone()[0]
             rows = db.execute('''SELECT id,created_at,sample,source_types,event_count,alert_count,incident_count
                 FROM scans ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?''', (limit, offset)).fetchall()
-        return {'items': [dict(scan_id=r[0], created_at=r[1], sample=r[2], source_types=json.loads(r[3]),
+        return {'items': [dict(scan_id=r[0], created_at=r[1], sample=english_sample_label(r[2]), source_types=json.loads(r[3]),
                               event_count=r[4], alert_count=r[5], incident_count=r[6]) for r in rows],
                 'total': total, 'limit': limit, 'offset': offset}
 

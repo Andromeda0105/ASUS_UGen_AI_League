@@ -18,12 +18,12 @@ class InvestigatorTests(unittest.TestCase):
 
     def final_message(self):
         return {"content": json.dumps({
-            "summary": "現有日誌可描述嘗試與成功驗證，但不能確認操作者身份。",
-            "assessment": [{"text": "多個競爭解釋仍需查證", "evidence_ids": [self.incident_id]}],
-            "recommendations": [{"text": "比對來源與帳號擁有者活動", "evidence_ids": [self.incident_id]}],
-            "missing_evidence": ["缺少程序與身份歸屬"], "confidence": 0.6,
+            "summary": "Current logs describe attempts and successful authentication but cannot identify the operator.",
+            "assessment": [{"text": "Competing explanations still need verification.", "evidence_ids": [self.incident_id]}],
+            "recommendations": [{"text": "Compare source activity with account owner records.", "evidence_ids": [self.incident_id]}],
+            "missing_evidence": ["Process telemetry and attribution are missing."], "confidence": 0.6,
             "hypothesis_evaluations": [{"hypothesis_id": h.id, "status": "plausible", "confidence": h.confidence,
-                 "inference": "此解釋可能符合部分記錄，但缺少操作者身份證據。", "evidence_ids": [self.incident_id],
+                 "inference": "This explanation may fit some records, but operator attribution is missing.", "evidence_ids": [self.incident_id],
                  "graph_edge_ids": []} for h in self.report.hypotheses],
         }, ensure_ascii=False)}
 
@@ -35,8 +35,8 @@ class InvestigatorTests(unittest.TestCase):
         self.assertEqual(result.report.stop_reason, "unavailable_telemetry")
         self.assertEqual(sum(q.status == "answered" for q in result.report.questions), 3)
         after = next(q for q in result.report.questions if q.evidence_type == "post_login_ssh_http")
-        self.assertIn("0 筆", after.answer)
-        self.assertIn("不證明", after.answer)
+        self.assertIn("0 matching records", after.answer)
+        self.assertIn("neither establish", after.answer)
         self.assertNotIn("raw_log", json.dumps(result.investigation))
 
     def test_budgets_zero_and_one_are_hard_limits(self):
@@ -110,7 +110,7 @@ class InvestigatorTests(unittest.TestCase):
 
     def test_ai_cannot_present_confirmed_compromise_as_fact(self):
         payload = json.loads(self.final_message()["content"])
-        payload["summary"] = "已確認入侵，攻擊者成功登入。"
+        payload["summary"] = "Confirmed compromise: the attacker successfully logged in."
         with patch("app.investigator.chat", return_value={"content": json.dumps(payload)}):
             result = run_hypothesis_investigation(self.store, self.incident_id, with_ai=True, tool_budget=0)
         self.assertEqual(result.ai_status, "unavailable")
@@ -153,4 +153,4 @@ class InvestigatorTests(unittest.TestCase):
         with patch.object(self.store, "execute", side_effect=truncated):
             result = run_hypothesis_investigation(self.store, self.incident_id, tool_budget=1)
         self.assertTrue(result.report.questions[0].truncated)
-        self.assertTrue(any("截斷" in item for item in result.report.missing_evidence))
+        self.assertTrue(any("Truncated" in item for item in result.report.missing_evidence))
